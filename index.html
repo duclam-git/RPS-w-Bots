@@ -112,7 +112,7 @@
                     <div class="hud-header">
                         <div class="hud-player-info">
                             <span class="hud-name" id="red-name-label">Đội Đỏ (Tactical AI)</span>
-                            <span class="hud-goal-tag">Đích cần đến: <strong>A1</strong> 🚩</span>
+                            <span class="hud-goal-tag">Đích cần đến: <strong id="red-goal-label">A1</strong> 🚩</span>
                         </div>
                         <div class="hud-counts" id="red-piece-counts">
                             <!-- Injected dynamically -->
@@ -126,30 +126,14 @@
                     </div>
                 </div>
 
-                <!-- 9x9 Board Viewport -->
+                <!-- Board Viewport -->
                 <div class="board-viewport">
                     <div class="ranks" id="ranks">
-                        <div class="label">9</div>
-                        <div class="label">8</div>
-                        <div class="label">7</div>
-                        <div class="label">6</div>
-                        <div class="label">5</div>
-                        <div class="label">4</div>
-                        <div class="label">3</div>
-                        <div class="label">2</div>
-                        <div class="label">1</div>
+                        <!-- Populated dynamically from GameConfig -->
                     </div>
                     <div class="board" id="board"></div>
                     <div class="files" id="files">
-                        <div class="label">A</div>
-                        <div class="label">B</div>
-                        <div class="label">C</div>
-                        <div class="label">D</div>
-                        <div class="label">E</div>
-                        <div class="label">F</div>
-                        <div class="label">G</div>
-                        <div class="label">H</div>
-                        <div class="label">I</div>
+                        <!-- Populated dynamically from GameConfig -->
                     </div>
                 </div>
 
@@ -158,7 +142,7 @@
                     <div class="hud-header">
                         <div class="hud-player-info">
                             <span class="hud-name" id="blue-name-label">Đội Xanh (Code Bot)</span>
-                            <span class="hud-goal-tag">Đích cần đến: <strong>I9</strong> 🏁</span>
+                            <span class="hud-goal-tag">Đích cần đến: <strong id="blue-goal-label">I9</strong> 🏁</span>
                         </div>
                         <div class="hud-counts" id="blue-piece-counts">
                             <!-- Injected dynamically -->
@@ -172,14 +156,9 @@
                     </div>
                 </div>
 
-                <!-- Rules Cheatsheet Ribbon -->
-                <div class="board-rules-ribbon">
-                    <span>✊ <strong>Đấm</strong> ăn ✌️ <strong>Kéo</strong></span>
-                    <span class="rule-divider">•</span>
-                    <span>✌️ <strong>Kéo</strong> ăn ✋ <strong>Lá</strong></span>
-                    <span class="rule-divider">•</span>
-                    <span>✋ <strong>Lá</strong> ăn ✊ <strong>Đấm</strong></span>
-                    <span class="rule-divider">•</span>
+                <!-- Rules Cheatsheet Ribbon (dynamically populated from GameConfig) -->
+                <div class="board-rules-ribbon" id="rules-ribbon">
+                    <!-- Populated dynamically by logic.js based on GameConfig.pieceTypes -->
                 </div>
             </section>
 

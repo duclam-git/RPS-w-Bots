@@ -3,64 +3,137 @@
 (function () {
     'use strict';
 
-    // Board Dimensions
-    const ROWS = 9;
-    const COLS = 9;
+    // =====================================================================
+    // ===== GAME CONFIGURATION — Edit this section to modify game rules =====
+    // =====================================================================
+    //
+    // All game rules are centralized here for easy modification.
+    // You can change:
+    //   - Board dimensions (rows, cols)
+    //   - Piece types (add/remove/rename)
+    //   - Capture rules (which type beats which)
+    //   - Goal positions for each team
+    //   - Initial piece placements
+    //   - Move range (how far a piece can move per turn)
+    //   - Maximum turns before a draw
+    //   - Whether diagonal movement is allowed
 
-    // Piece Types
-    const ROCK = 'rock';
-    const PAPER = 'paper';
-    const SCISSORS = 'scissors';
+    const GameConfig = {
 
-    // SVG Icons
-    const PIECE_SVG = {
-        [ROCK]: `<svg viewBox="0 0 24 24"><path d="M5.5 10.5c0-1 .7-2 1.5-2.5V6.5a2 2 0 0 1 2-2c.4 0 .8.1 1.1.3A2 2 0 0 1 12 3.5a2 2 0 0 1 1.9 1.3c.3-.2.7-.3 1.1-.3a2 2 0 0 1 2 2v.5c.5.3 1 .8 1.2 1.5l.3 1.5v3a5 5 0 0 1-2 4l-1 .8a3 3 0 0 1-1.8.7H10a3 3 0 0 1-2.1-.9l-1.5-1.5A5 5 0 0 1 5.5 13z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="9" y1="5" x2="9" y2="9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="12" y1="4.5" x2="12" y2="9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="15" y1="5" x2="15" y2="9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
-        [PAPER]: `<svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2.2"/><line x1="8.5" y1="8" x2="15.5" y2="8" stroke="currentColor" stroke-width="2"/><line x1="8.5" y1="12" x2="15.5" y2="12" stroke="currentColor" stroke-width="2"/><line x1="8.5" y1="16" x2="13" y2="16" stroke="currentColor" stroke-width="2"/></svg>`,
-        [SCISSORS]: `<svg viewBox="0 0 24 24"><circle cx="7" cy="17" r="2.8" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="17" cy="17" r="2.8" fill="none" stroke="currentColor" stroke-width="2.2"/><line x1="9.2" y1="15" x2="17" y2="5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><line x1="14.8" y1="15" x2="7" y2="5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`
+        // --- Board ---
+        rows: 10,
+        cols: 10,
+
+        // --- Piece Types ---
+        // Each key is the internal type ID. Add or remove types here.
+        // 'beats' is an array of type IDs that this type can capture.
+        pieceTypes: {
+            rock: {
+                name: 'Đấm (Rock)',
+                emoji: '✊',
+                beats: ['scissors'],
+                svg: `<svg viewBox="0 0 24 24"><path d="M5.5 10.5c0-1 .7-2 1.5-2.5V6.5a2 2 0 0 1 2-2c.4 0 .8.1 1.1.3A2 2 0 0 1 12 3.5a2 2 0 0 1 1.9 1.3c.3-.2.7-.3 1.1-.3a2 2 0 0 1 2 2v.5c.5.3 1 .8 1.2 1.5l.3 1.5v3a5 5 0 0 1-2 4l-1 .8a3 3 0 0 1-1.8.7H10a3 3 0 0 1-2.1-.9l-1.5-1.5A5 5 0 0 1 5.5 13z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="9" y1="5" x2="9" y2="9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="12" y1="4.5" x2="12" y2="9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="15" y1="5" x2="15" y2="9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`
+            },
+            paper: {
+                name: 'Lá (Paper)',
+                emoji: '✋',
+                beats: ['rock'],
+                svg: `<svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2.2"/><line x1="8.5" y1="8" x2="15.5" y2="8" stroke="currentColor" stroke-width="2"/><line x1="8.5" y1="12" x2="15.5" y2="12" stroke="currentColor" stroke-width="2"/><line x1="8.5" y1="16" x2="13" y2="16" stroke="currentColor" stroke-width="2"/></svg>`
+            },
+            scissors: {
+                name: 'Kéo (Scissors)',
+                emoji: '✌️',
+                beats: ['paper'],
+                svg: `<svg viewBox="0 0 24 24"><circle cx="7" cy="17" r="2.8" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="17" cy="17" r="2.8" fill="none" stroke="currentColor" stroke-width="2.2"/><line x1="9.2" y1="15" x2="17" y2="5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><line x1="14.8" y1="15" x2="7" y2="5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`
+            }
+            // --- Example: Add a 4th type (Rock-Paper-Scissors-Lizard-Spock style) ---
+            // lizard: {
+
+            //     name: 'Thằn lằn (Lizard)',
+            //     emoji: '🦎',
+            //     beats: ['paper', 'spock'],
+            //     svg: `<svg viewBox="0 0 24 24">...</svg>`
+            // },
+            // spock: {
+            //     name: 'Spock',
+            //     emoji: '🖖',
+            //     beats: ['scissors', 'rock'],
+            //     svg: `<svg viewBox="0 0 24 24">...</svg>`
+            // },
+        },
+
+        // --- Movement Rules ---
+        moveRange: 1,               // Max squares a piece can move per turn
+        allowDiagonal: true,         // Allow diagonal movement (8 directions if true, 4 if false)
+
+        // --- Goals ---
+        // Blue (player 1) target and Red (player 2) target positions.
+        // Set to null to automatically target the opposite corners:
+        //   Blue -> top-right (r=0, c=cols-1)
+        //   Red  -> bottom-left (r=rows-1, c=0)
+        // Or set custom coordinates: { r: row, c: col }
+        blueGoal: null,
+        redGoal:  null,
+
+        // --- Match Limits ---
+        maxTurns: 2000,               // Draw after this many total turns (both players combined)
+
+        // --- Initial Piece Placements ---
+        // Each entry: { r: row, c: col, t: 'typeId' }
+        initialPiecesBlue: [
+            { r: 4, c: 1, t: 'paper' },      // B5
+            { r: 4, c: 2, t: 'scissors' },   // C5
+            { r: 5, c: 1, t: 'rock' },       // B4
+            { r: 5, c: 2, t: 'paper' },      // C4
+            { r: 5, c: 3, t: 'scissors' },   // D4
+            { r: 6, c: 2, t: 'rock' },       // C3
+            { r: 6, c: 3, t: 'paper' },      // D3
+            { r: 6, c: 4, t: 'scissors' },   // E3
+            { r: 7, c: 3, t: 'rock' },       // D2
+            { r: 7, c: 4, t: 'paper' }       // E2
+        ],
+        initialPiecesRed: [
+            { r: 4, c: 6, t: 'scissors' },   // G5
+            { r: 4, c: 7, t: 'paper' },      // H5
+            { r: 3, c: 5, t: 'scissors' },   // F6
+            { r: 3, c: 6, t: 'paper' },      // G6
+            { r: 3, c: 7, t: 'rock' },       // H6
+            { r: 2, c: 4, t: 'scissors' },   // E7
+            { r: 2, c: 5, t: 'paper' },      // F7
+            { r: 2, c: 6, t: 'rock' },       // G7
+            { r: 1, c: 4, t: 'paper' },      // E8
+            { r: 1, c: 5, t: 'rock' }        // F8
+        ]
     };
 
-    const TYPE_NAMES = {
-        [ROCK]: 'Đấm (Rock)',
-        [PAPER]: 'Lá (Paper)',
-        [SCISSORS]: 'Kéo (Scissors)'
-    };
+    // =====================================================================
+    // ===== END OF GAME CONFIGURATION =====================================
+    // =====================================================================
 
-    const TYPE_EMOJI = {
-        [ROCK]: '✊',
-        [PAPER]: '✋',
-        [SCISSORS]: '✌️'
-    };
+    // --- Derived constants from GameConfig (do not edit below) ---
+    const ROWS = GameConfig.rows;
+    const COLS = GameConfig.cols;
+    const BLUE_GOAL = (GameConfig.blueGoal && GameConfig.blueGoal.r !== undefined)
+        ? GameConfig.blueGoal
+        : { r: 0, c: COLS - 1 };
+    const RED_GOAL = (GameConfig.redGoal && GameConfig.redGoal.r !== undefined)
+        ? GameConfig.redGoal
+        : { r: ROWS - 1, c: 0 };
 
-    // Goals: Blue target is I9 (r=0, c=8), Red target is A1 (r=8, c=0)
-    const BLUE_GOAL = { r: 0, c: 8 };
-    const RED_GOAL = { r: 8, c: 0 };
+    // Build lookup tables from GameConfig.pieceTypes
+    const PIECE_SVG = {};
+    const TYPE_NAMES = {};
+    const TYPE_EMOJI = {};
+    for (const [typeId, info] of Object.entries(GameConfig.pieceTypes)) {
+        PIECE_SVG[typeId] = info.svg;
+        TYPE_NAMES[typeId] = info.name;
+        TYPE_EMOJI[typeId] = info.emoji;
+    }
 
-    // Initial Piece Setups
+    // Initial Piece Setups (reads from GameConfig)
     function getInitialPieces() {
-        const p1 = [
-            { r: 4, c: 1, t: PAPER },    // B5
-            { r: 4, c: 2, t: SCISSORS }, // C5
-            { r: 5, c: 1, t: ROCK },     // B4
-            { r: 5, c: 2, t: PAPER },    // C4
-            { r: 5, c: 3, t: SCISSORS }, // D4
-            { r: 6, c: 2, t: ROCK },     // C3
-            { r: 6, c: 3, t: PAPER },    // D3
-            { r: 6, c: 4, t: SCISSORS }, // E3
-            { r: 7, c: 3, t: ROCK },     // D2
-            { r: 7, c: 4, t: PAPER }     // E2
-        ];
-        const p2 = [
-            { r: 4, c: 6, t: SCISSORS }, // G5
-            { r: 4, c: 7, t: PAPER },    // H5
-            { r: 3, c: 5, t: SCISSORS }, // F6
-            { r: 3, c: 6, t: PAPER },    // G6
-            { r: 3, c: 7, t: ROCK },     // H6
-            { r: 2, c: 4, t: SCISSORS }, // E7
-            { r: 2, c: 5, t: PAPER },    // F7
-            { r: 2, c: 6, t: ROCK },     // G7
-            { r: 1, c: 4, t: PAPER },    // E8
-            { r: 1, c: 5, t: ROCK }      // F8
-        ];
+        const p1 = GameConfig.initialPiecesBlue.map(p => ({ r: p.r, c: p.c, t: p.t }));
+        const p2 = GameConfig.initialPiecesRed.map(p => ({ r: p.r, c: p.c, t: p.t }));
         return { p1, p2 };
     }
 
@@ -168,15 +241,14 @@
     function canCapture(attackerType, defenderType) {
         if (!attackerType || !defenderType) return false;
         if (attackerType === defenderType) return false;
-        if (attackerType === ROCK && defenderType === SCISSORS) return true;
-        if (attackerType === SCISSORS && defenderType === PAPER) return true;
-        if (attackerType === PAPER && defenderType === ROCK) return true;
-        return false;
+        const attackerInfo = GameConfig.pieceTypes[attackerType];
+        if (!attackerInfo) return false;
+        return attackerInfo.beats.includes(defenderType);
     }
 
     function toNotation(r, c) {
         const col = String.fromCharCode(65 + c);
-        const row = 9 - r;
+        const row = ROWS - r;
         return col + row;
     }
 
@@ -185,7 +257,7 @@
         const colChar = str.charAt(0).toUpperCase();
         const rowChar = str.slice(1);
         const c = colChar.charCodeAt(0) - 65;
-        const r = 9 - parseInt(rowChar, 10);
+        const r = ROWS - parseInt(rowChar, 10);
         if (r < 0 || r >= ROWS || c < 0 || c >= COLS || isNaN(r) || isNaN(c)) return null;
         return { r, c };
     }
@@ -208,7 +280,11 @@
 
         const rowDiff = Math.abs(dr - sr);
         const colDiff = Math.abs(dc - sc);
-        if (rowDiff > 1 || colDiff > 1 || (rowDiff === 0 && colDiff === 0)) return false;
+        if (rowDiff === 0 && colDiff === 0) return false;
+        if (rowDiff > GameConfig.moveRange || colDiff > GameConfig.moveRange) return false;
+
+        // Block diagonal movement if not allowed
+        if (!GameConfig.allowDiagonal && rowDiff > 0 && colDiff > 0) return false;
 
         const myPiece = b[sr][sc];
         if (!myPiece) return false;
@@ -221,12 +297,13 @@
 
     function getLegalMoves(player, b = board) {
         const moves = [];
+        const range = GameConfig.moveRange;
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
                 const p = b[r][c];
                 if (p && p.player === player) {
-                    for (let dr = -1; dr <= 1; dr++) {
-                        for (let dc = -1; dc <= 1; dc++) {
+                    for (let dr = -range; dr <= range; dr++) {
+                        for (let dc = -range; dc <= range; dc++) {
                             if (dr === 0 && dc === 0) continue;
                             const nr = r + dr;
                             const nc = c + dc;
@@ -257,7 +334,10 @@
     }
 
     function getPieceCounts(player, b = board) {
-        const counts = { [ROCK]: 0, [PAPER]: 0, [SCISSORS]: 0, total: 0 };
+        const counts = { total: 0 };
+        for (const typeId of Object.keys(GameConfig.pieceTypes)) {
+            counts[typeId] = 0;
+        }
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
                 const p = b[r][c];
@@ -284,16 +364,16 @@
     }
 
     function checkWin(b = board) {
-        // Goal reach: Blue reaches I9 (r=0, c=8) on the other side
-        const pieceAtI9 = b[BLUE_GOAL.r][BLUE_GOAL.c];
-        if (pieceAtI9 && pieceAtI9.player === 1) {
-            return { winner: 1, reason: 'Đội Xanh đã đưa quân tới ô đích I9 ở phía bên kia bàn cờ!' };
+        // Goal reach: Blue reaches target on the other side
+        const pieceAtBlueGoal = b[BLUE_GOAL.r][BLUE_GOAL.c];
+        if (pieceAtBlueGoal && pieceAtBlueGoal.player === 1) {
+            return { winner: 1, reason: `Đội Xanh đã đưa quân tới ô đích ${toNotation(BLUE_GOAL.r, BLUE_GOAL.c)} ở phía bên kia bàn cờ!` };
         }
 
-        // Goal reach: Red reaches A1 (r=8, c=0) on the other side
-        const pieceAtA1 = b[RED_GOAL.r][RED_GOAL.c];
-        if (pieceAtA1 && pieceAtA1.player === 2) {
-            return { winner: 2, reason: 'Đội Đỏ đã đưa quân tới ô đích A1 ở phía bên kia bàn cờ!' };
+        // Goal reach: Red reaches target on the other side
+        const pieceAtRedGoal = b[RED_GOAL.r][RED_GOAL.c];
+        if (pieceAtRedGoal && pieceAtRedGoal.player === 2) {
+            return { winner: 2, reason: `Đội Đỏ đã đưa quân tới ô đích ${toNotation(RED_GOAL.r, RED_GOAL.c)} ở phía bên kia bàn cờ!` };
         }
 
         // Total elimination check (if a team loses all pieces on the board)
@@ -545,9 +625,9 @@
             return true;
         }
 
-        // Draw by move limit (200 turns = 100 rounds)
-        if (turnCount >= 200) {
-            handleGameOver('draw', 'Trận đấu kết thúc hòa sau 200 nước đi (Giới hạn tối đa)!');
+        // Draw by move limit
+        if (turnCount >= GameConfig.maxTurns) {
+            handleGameOver('draw', `Trận đấu kết thúc hòa sau ${GameConfig.maxTurns} nước đi (Giới hạn tối đa)!`);
             return true;
         }
 
@@ -711,17 +791,25 @@
             for (let c = 0; c < COLS; c++) {
                 const cell = document.createElement('div');
                 cell.classList.add('cell');
+                cell.classList.add((r + c) % 2 === 0 ? 'cell-light' : 'cell-dark');
                 cell.dataset.r = r;
                 cell.dataset.c = c;
 
-                // Goals: Blue goal at I9 (r=0, c=8), Red goal at A1 (r=8, c=0)
+                if (c === COLS - 1) cell.classList.add('last-col');
+                if (r === ROWS - 1) cell.classList.add('last-row');
+
+                // Goals
                 if (r === BLUE_GOAL.r && c === BLUE_GOAL.c) {
                     cell.classList.add('goal-blue');
-                    cell.title = "Đích Đội Xanh (I9) — Về đây để thắng!";
+                    const notation = toNotation(BLUE_GOAL.r, BLUE_GOAL.c);
+                    cell.dataset.goalText = `🏁 ${notation}`;
+                    cell.title = `Đích Đội Xanh (${notation}) — Về đây để thắng!`;
                 }
                 if (r === RED_GOAL.r && c === RED_GOAL.c) {
                     cell.classList.add('goal-red');
-                    cell.title = "Đích Đội Đỏ (A1) — Về đây để thắng!";
+                    const notation = toNotation(RED_GOAL.r, RED_GOAL.c);
+                    cell.dataset.goalText = `🚩 ${notation}`;
+                    cell.title = `Đích Đội Đỏ (${notation}) — Về đây để thắng!`;
                 }
 
                 // Selected highlight
@@ -818,18 +906,14 @@
         const rCounts = getPieceCounts(2, board);
 
         if (blueCountsEl) {
-            blueCountsEl.innerHTML = `
-                <span class="count-badge" title="Đấm còn lại">${TYPE_EMOJI[ROCK]} ${bCounts[ROCK]}</span>
-                <span class="count-badge" title="Lá còn lại">${TYPE_EMOJI[PAPER]} ${bCounts[PAPER]}</span>
-                <span class="count-badge" title="Kéo còn lại">${TYPE_EMOJI[SCISSORS]} ${bCounts[SCISSORS]}</span>
-            `;
+            blueCountsEl.innerHTML = Object.keys(GameConfig.pieceTypes).map(typeId =>
+                `<span class="count-badge" title="${TYPE_NAMES[typeId]} còn lại">${TYPE_EMOJI[typeId]} ${bCounts[typeId] || 0}</span>`
+            ).join('\n                ');
         }
         if (redCountsEl) {
-            redCountsEl.innerHTML = `
-                <span class="count-badge" title="Đấm còn lại">${TYPE_EMOJI[ROCK]} ${rCounts[ROCK]}</span>
-                <span class="count-badge" title="Lá còn lại">${TYPE_EMOJI[PAPER]} ${rCounts[PAPER]}</span>
-                <span class="count-badge" title="Kéo còn lại">${TYPE_EMOJI[SCISSORS]} ${rCounts[SCISSORS]}</span>
-            `;
+            redCountsEl.innerHTML = Object.keys(GameConfig.pieceTypes).map(typeId =>
+                `<span class="count-badge" title="${TYPE_NAMES[typeId]} còn lại">${TYPE_EMOJI[typeId]} ${rCounts[typeId] || 0}</span>`
+            ).join('\n                ');
         }
     }
 
@@ -1093,10 +1177,10 @@
                     totalTurns += matchTurns;
                     if (winCheck.winner === 1) {
                         blueWins++;
-                        if (winCheck.reason.includes('I9')) blueGoalWins++;
+                        if (winCheck.reason.includes(toNotation(BLUE_GOAL.r, BLUE_GOAL.c))) blueGoalWins++;
                     } else if (winCheck.winner === 2) {
                         redWins++;
-                        if (winCheck.reason.includes('A1')) redGoalWins++;
+                        if (winCheck.reason.includes(toNotation(RED_GOAL.r, RED_GOAL.c))) redGoalWins++;
                     } else {
                         draws++;
                     }
@@ -1132,14 +1216,16 @@
                 if (startSimBtn) startSimBtn.disabled = false;
                 const statsEl = document.getElementById('sim-final-stats');
                 if (statsEl) {
+                    const blueGoalNotation = toNotation(BLUE_GOAL.r, BLUE_GOAL.c);
+                    const redGoalNotation = toNotation(RED_GOAL.r, RED_GOAL.c);
                     statsEl.innerHTML = `
                         <div class="sim-stat-box">
                             <h4>🔵 Đội Xanh: ${Math.round((blueWins / matchCount) * 100)}%</h4>
-                            <p>Số trận thắng (chiếm ô I9): <strong>${blueWins}</strong></p>
+                            <p>Số trận thắng (chiếm ô ${blueGoalNotation}): <strong>${blueWins}</strong></p>
                         </div>
                         <div class="sim-stat-box">
                             <h4>🔴 Đội Đỏ: ${Math.round((redWins / matchCount) * 100)}%</h4>
-                            <p>Số trận thắng (chiếm ô A1): <strong>${redWins}</strong></p>
+                            <p>Số trận thắng (chiếm ô ${redGoalNotation}): <strong>${redWins}</strong></p>
                         </div>
                         <div class="sim-stat-box">
                             <h4>📊 Số nước trung bình: <strong>${Math.round(totalTurns / matchCount)} nước</strong></h4>
@@ -1506,6 +1592,14 @@
         if (redLabel) {
             redLabel.textContent = `Đội Đỏ (${getControllerTitle(controllers.red)})`;
         }
+        const blueGoalEl = document.getElementById('blue-goal-label');
+        const redGoalEl = document.getElementById('red-goal-label');
+        if (blueGoalEl) {
+            blueGoalEl.textContent = toNotation(BLUE_GOAL.r, BLUE_GOAL.c);
+        }
+        if (redGoalEl) {
+            redGoalEl.textContent = toNotation(RED_GOAL.r, RED_GOAL.c);
+        }
     }
 
     function getControllerTitle(ctrl) {
@@ -1520,9 +1614,67 @@
         }
     }
 
+    // ===== Dynamic UI Generation from GameConfig =====
+
+    function renderRulesRibbon() {
+        const ribbon = document.getElementById('rules-ribbon');
+        if (!ribbon) return;
+        const rules = [];
+        for (const [typeId, info] of Object.entries(GameConfig.pieceTypes)) {
+            for (const beatenId of info.beats) {
+                const beatenInfo = GameConfig.pieceTypes[beatenId];
+                if (beatenInfo) {
+                    rules.push(`<span>${info.emoji} <strong>${info.name.split(' (')[0]}</strong> ăn ${beatenInfo.emoji} <strong>${beatenInfo.name.split(' (')[0]}</strong></span>`);
+                }
+            }
+        }
+        ribbon.innerHTML = rules.join('<span class="rule-divider">•</span>');
+    }
+
+    function renderBoardLabels() {
+        const root = document.documentElement;
+        const maxDim = Math.max(ROWS, COLS);
+        root.style.setProperty('--board-cols', COLS);
+        root.style.setProperty('--board-rows', ROWS);
+        root.style.setProperty('--cell-size', `calc(var(--board-max-size) / ${maxDim})`);
+
+        // Update rank labels (row numbers)
+        const ranksEl = document.getElementById('ranks');
+        if (ranksEl) {
+            ranksEl.innerHTML = '';
+            ranksEl.style.gridTemplateRows = `repeat(${ROWS}, 1fr)`;
+            for (let r = 0; r < ROWS; r++) {
+                const label = document.createElement('div');
+                label.classList.add('label');
+                label.textContent = ROWS - r;
+                ranksEl.appendChild(label);
+            }
+        }
+        // Update file labels (column letters)
+        const filesEl = document.getElementById('files');
+        if (filesEl) {
+            filesEl.innerHTML = '';
+            filesEl.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+            for (let c = 0; c < COLS; c++) {
+                const label = document.createElement('div');
+                label.classList.add('label');
+                label.textContent = String.fromCharCode(65 + c);
+                filesEl.appendChild(label);
+            }
+        }
+        // Update CSS grid to match board dimensions
+        const boardEl = document.getElementById('board');
+        if (boardEl) {
+            boardEl.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+            boardEl.style.gridTemplateRows = `repeat(${ROWS}, 1fr)`;
+        }
+    }
+
     // ===== App Startup =====
 
     function init() {
+        renderBoardLabels();
+        renderRulesRibbon();
         initBoard();
         initAceEditors();
         drawBoard();
@@ -1544,6 +1696,7 @@
 
     // Expose global for debugging if needed
     window.OTTArena = {
+        GameConfig,
         initBoard,
         startBattle,
         pauseBattle,

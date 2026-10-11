@@ -24,8 +24,13 @@
     --theme-term-bg: #18181b;
     --theme-term-text: #f4f4f5;
 
-    --board-size: min(92vw, 470px);
-    --cell-size: calc(var(--board-size) / 9);
+    --board-max-size: min(92vw, 470px);
+    --board-cols: 9;
+    --board-rows: 9;
+    --cell-size: calc(var(--board-max-size) / 9);
+    --board-width: calc(var(--cell-size) * var(--board-cols));
+    --board-height: calc(var(--cell-size) * var(--board-rows));
+    --board-size: var(--board-width);
 }
 
 * {
@@ -464,18 +469,19 @@ body {
     grid-template-areas:
         "ranks board"
         ".     files";
-    grid-template-columns: 24px var(--board-size);
-    grid-template-rows: var(--board-size) 24px;
+    grid-template-columns: 24px var(--board-width);
+    grid-template-rows: var(--board-height) 24px;
     gap: 4px;
     user-select: none;
 }
 
 .ranks {
     grid-area: ranks;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-around;
+    height: var(--board-height);
+    display: grid;
+    grid-template-rows: repeat(var(--board-rows), 1fr);
     align-items: center;
+    justify-items: center;
     font-weight: 800;
     font-size: 0.78rem;
     color: var(--theme-ink-muted);
@@ -483,9 +489,11 @@ body {
 
 .files {
     grid-area: files;
-    display: flex;
-    justify-content: space-around;
+    width: var(--board-width);
+    display: grid;
+    grid-template-columns: repeat(var(--board-cols), 1fr);
     align-items: center;
+    justify-items: center;
     font-weight: 800;
     font-size: 0.78rem;
     color: var(--theme-ink-muted);
@@ -493,11 +501,11 @@ body {
 
 .board {
     grid-area: board;
-    width: var(--board-size);
-    height: var(--board-size);
+    width: var(--board-width);
+    height: var(--board-height);
     display: grid;
-    grid-template-columns: repeat(9, 1fr);
-    grid-template-rows: repeat(9, 1fr);
+    grid-template-columns: repeat(var(--board-cols), 1fr);
+    grid-template-rows: repeat(var(--board-rows), 1fr);
     border: 3.5px solid var(--theme-border);
     border-radius: 8px;
     box-shadow: 6px 6px 0 var(--theme-border);
@@ -517,12 +525,12 @@ body {
     transition: background 0.12s ease;
 }
 
-.cell:nth-child(9n) { border-right: none; }
-.cell:nth-last-child(-n+9) { border-bottom: none; }
+.cell.last-col { border-right: none; }
+.cell.last-row { border-bottom: none; }
 
-/* Alternating subtle checker pattern */
-.cell:nth-child(even) { background-color: #f8fafc; }
-.cell:nth-child(odd) { background-color: #ffffff; }
+/* True 2D Checkered Chessboard Pattern */
+.cell.cell-light { background-color: #ffffff; }
+.cell.cell-dark { background-color: #e8edf2; }
 
 .cell:hover {
     background-color: #e0f2fe;
@@ -533,7 +541,7 @@ body {
     background-color: #dbeafe !important;
 }
 .cell.goal-blue::before {
-    content: "🏁 I9";
+    content: attr(data-goal-text);
     position: absolute;
     bottom: 2px;
     right: 2px;
@@ -548,7 +556,7 @@ body {
     background-color: #fee2e2 !important;
 }
 .cell.goal-red::before {
-    content: "🚩 A1";
+    content: attr(data-goal-text);
     position: absolute;
     top: 2px;
     left: 2px;
