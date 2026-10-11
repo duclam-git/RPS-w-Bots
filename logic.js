@@ -21,8 +21,8 @@
     const GameConfig = {
 
         // --- Board ---
-        rows: 10,
-        cols: 10,
+        rows: 9,
+        cols: 9,
 
         // --- Piece Types ---
         // Each key is the internal type ID. Add or remove types here.
@@ -246,19 +246,43 @@
         return attackerInfo.beats.includes(defenderType);
     }
 
+    function toColumnName(c) {
+        let col = "";
+        let n = c + 1; // Convert 0-based index to 1-based column number
+        while (n > 0) {
+            n--;
+            col = String.fromCharCode(65 + (n % 26)) + col;
+            n = Math.floor(n / 26);
+        }
+        return col;
+    }
+
     function toNotation(r, c) {
-        const col = String.fromCharCode(65 + c);
-        const row = ROWS - r;
-        return col + row;
+        return toColumnName(c) + (ROWS - r);
     }
 
     function fromNotation(str) {
         if (!str || str.length < 2) return null;
-        const colChar = str.charAt(0).toUpperCase();
-        const rowChar = str.slice(1);
-        const c = colChar.charCodeAt(0) - 65;
-        const r = ROWS - parseInt(rowChar, 10);
-        if (r < 0 || r >= ROWS || c < 0 || c >= COLS || isNaN(r) || isNaN(c)) return null;
+
+        const match = str.toUpperCase().match(/^([A-Z]+)(\d+)$/);
+        if (!match) return null;
+
+        const colStr = match[1];
+        const rowNum = parseInt(match[2], 10);
+
+        // Convert column letters to a 1-based column number
+        let colNum = 0;
+        for (const ch of colStr) {
+            colNum = colNum * 26 + (ch.charCodeAt(0) - 64);
+        }
+
+        const c = colNum - 1; // Convert to 0-based index
+        const r = ROWS - rowNum;
+
+        if (r < 0 || r >= ROWS || c < 0 || c >= COLS) {
+            return null;
+        }
+
         return { r, c };
     }
 
@@ -455,6 +479,7 @@
             canCapture,
             distance: (r1, c1, r2, c2) => Math.max(Math.abs(r1 - r2), Math.abs(c1 - c2)),
             manhattanDistance: (r1, c1, r2, c2) => Math.abs(r1 - r2) + Math.abs(c1 - c2),
+            toColumnName,
             toNotation,
             fromNotation,
             cloneBoard,
@@ -1120,6 +1145,7 @@
                 canCapture,
                 distance: (r1, c1, r2, c2) => Math.max(Math.abs(r1 - r2), Math.abs(c1 - c2)),
                 manhattanDistance: (r1, c1, r2, c2) => Math.abs(r1 - r2) + Math.abs(c1 - c2),
+                toColumnName,
                 toNotation,
                 fromNotation,
                 cloneBoard,
@@ -1634,14 +1660,27 @@
     function renderBoardLabels() {
         const root = document.documentElement;
         const maxDim = Math.max(ROWS, COLS);
+        const cellSizeVal = `calc(var(--board-max-size) / ${maxDim})`;
+        const boardWidthVal = `calc(${cellSizeVal} * ${COLS})`;
+        const boardHeightVal = `calc(${cellSizeVal} * ${ROWS})`;
+
         root.style.setProperty('--board-cols', COLS);
         root.style.setProperty('--board-rows', ROWS);
-        root.style.setProperty('--cell-size', `calc(var(--board-max-size) / ${maxDim})`);
+        root.style.setProperty('--cell-size', cellSizeVal);
+        root.style.setProperty('--board-width', boardWidthVal);
+        root.style.setProperty('--board-height', boardHeightVal);
+
+        const viewportEl = document.querySelector('.board-viewport');
+        if (viewportEl) {
+            viewportEl.style.gridTemplateColumns = `24px ${boardWidthVal}`;
+            viewportEl.style.gridTemplateRows = `${boardHeightVal} 24px`;
+        }
 
         // Update rank labels (row numbers)
         const ranksEl = document.getElementById('ranks');
         if (ranksEl) {
             ranksEl.innerHTML = '';
+            ranksEl.style.height = boardHeightVal;
             ranksEl.style.gridTemplateRows = `repeat(${ROWS}, 1fr)`;
             for (let r = 0; r < ROWS; r++) {
                 const label = document.createElement('div');
@@ -1650,21 +1689,27 @@
                 ranksEl.appendChild(label);
             }
         }
+
         // Update file labels (column letters)
         const filesEl = document.getElementById('files');
         if (filesEl) {
             filesEl.innerHTML = '';
+            filesEl.style.width = boardWidthVal;
+            filesEl.style.height = '24px';
             filesEl.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
             for (let c = 0; c < COLS; c++) {
                 const label = document.createElement('div');
                 label.classList.add('label');
-                label.textContent = String.fromCharCode(65 + c);
+                label.textContent = toColumnName(c);
                 filesEl.appendChild(label);
             }
         }
+
         // Update CSS grid to match board dimensions
         const boardEl = document.getElementById('board');
         if (boardEl) {
+            boardEl.style.width = boardWidthVal;
+            boardEl.style.height = boardHeightVal;
             boardEl.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
             boardEl.style.gridTemplateRows = `repeat(${ROWS}, 1fr)`;
         }
@@ -1697,6 +1742,9 @@
     // Expose global for debugging if needed
     window.OTTArena = {
         GameConfig,
+        toColumnName,
+        toNotation,
+        fromNotation,
         initBoard,
         startBattle,
         pauseBattle,
