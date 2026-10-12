@@ -40,6 +40,26 @@
     "isBot": true
   },
   {
+    "name": "Người chơi 790",
+    "elo": 1216,
+    "matches": 1,
+    "wins": 1,
+    "losses": 0,
+    "draws": 0,
+    "lang": "javascript",
+    "isBot": false
+  },
+  {
+    "name": "Người chơi 656",
+    "elo": 1184,
+    "matches": 1,
+    "wins": 0,
+    "losses": 1,
+    "draws": 0,
+    "lang": "javascript",
+    "isBot": false
+  },
+  {
     "name": "Random AI",
     "elo": 1000,
     "matches": 30,

@@ -109,6 +109,31 @@
             </div>
         </header>
 
+        <!-- Online Active Match Room Banner (Visible when player is in an Online Room) -->
+        <div id="online-active-bar" class="online-active-bar" style="display: none;">
+            <div class="oab-left">
+                <span class="oab-badge">🌐 ĐẤU ONLINE</span>
+                <span class="oab-room">Phòng: <strong id="oab-room-code">OTT-XXXX</strong> <button id="oab-copy-btn" class="oab-btn-icon" title="Sao chép mã phòng">📋</button></span>
+                <span class="oab-role">Bạn là: <strong id="oab-my-role">🔵 Đội Xanh</strong></span>
+            </div>
+            <div class="oab-center">
+                <div class="oab-players-status">
+                    <span id="oab-blue-status" class="oab-pill waiting">🔵 Xanh: Đang viết code</span>
+                    <span class="oab-vs">VS</span>
+                    <span id="oab-red-status" class="oab-pill waiting">🔴 Đỏ: Đang chờ</span>
+                </div>
+                <div id="oab-status-text" class="oab-subtext">Hãy chỉnh sửa code bot của bạn và bấm "Nộp Code" khi hoàn tất!</div>
+            </div>
+            <div class="oab-right">
+                <button id="online-submit-code-btn" class="action-btn btn-primary btn-submit-code">
+                    📤 Nộp Code Thi Đấu
+                </button>
+                <button id="online-exit-room-btn" class="action-btn btn-secondary btn-sm" title="Rời khỏi phòng đấu này">
+                    🚪 Rời Phòng
+                </button>
+            </div>
+        </div>
+
         <!-- Main Workspace (Split View: Board on Left, Code Studio on Right) -->
         <main class="arena-main-workspace">
             
@@ -546,13 +571,22 @@
                         </div>
                     </div>
 
-                    <div id="online-sync-status" style="font-size:0.8rem; font-weight:700; text-align:center; color:var(--theme-ink-muted);">
-                        Chờ cả hai người chơi bấm Sẵn Sàng để bắt đầu...
+                    <div id="online-sync-status" style="font-size:0.83rem; font-weight:700; text-align:center; color:var(--theme-ink); background:var(--theme-surface-muted); padding:8px; border-radius:6px; border:1px solid var(--theme-line);">
+                        💡 Hãy vào màn hình soạn code để chuẩn bị thuật toán. Trận đấu CHỈ BẮT ĐẦU khi cả 2 người chơi đều bấm nút "Nộp Code"!
                     </div>
 
-                    <div style="display:flex; gap:8px; margin-top:6px;">
-                        <button id="online-ready-btn" class="action-btn btn-primary" style="flex:1;">✓ Sẵn Sàng Đấu</button>
-                        <button id="online-leave-room-btn" class="action-btn btn-secondary">Rời phòng</button>
+                    <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
+                        <button id="online-go-code-btn" class="action-btn btn-gold" style="width:100%; font-size:1rem; padding:10px;">
+                            ✍️ Vào Màn Hình Soạn Code
+                        </button>
+                        <div style="display:flex; gap:8px;">
+                            <button id="online-ready-btn" class="action-btn btn-primary" style="flex:1;">
+                                📤 Nộp Code Hiện Tại
+                            </button>
+                            <button id="online-leave-room-btn" class="action-btn btn-secondary">
+                                🚪 Rời phòng
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

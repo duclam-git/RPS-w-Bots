@@ -275,25 +275,31 @@ io.on('connection', (socket) => {
             room.blue.lang = lang;
             if (name) room.blue.name = name;
             room.blue.ready = true;
+            io.to(roomCode).emit('player_submitted', { player: 'blue', name: room.blue.name });
         } else if (isRed) {
             room.red.code = code;
             room.red.lang = lang;
             if (name) room.red.name = name;
             room.red.ready = true;
+            io.to(roomCode).emit('player_submitted', { player: 'red', name: room.red.name });
         }
 
         io.to(roomCode).emit('room_updated', getRoomPublicState(room));
 
-        // If both ready, start compilation and battle
+        // ONLY when BOTH players have submitted code, begin compilation and battle
         if (room.blue && room.blue.ready && room.red && room.red.ready && !room.gameActive) {
-            io.to(roomCode).emit('match_preparing', 'Đang biên dịch và chuẩn bị môi trường thi đấu...');
+            io.to(roomCode).emit('match_preparing', '⏳ Cả 2 người chơi đã nộp code! Đang kiểm tra cú pháp và biên dịch code...');
 
             // Prepare Blue bot
             const bluePrep = await runner.prepareBot(roomCode + '_blue', room.blue.lang, room.blue.code);
             if (!bluePrep.success) {
                 room.blue.ready = false;
                 io.to(roomCode).emit('room_updated', getRoomPublicState(room));
-                return io.to(roomCode).emit('match_error', `[Đội Xanh] ${bluePrep.error}`);
+                return io.to(roomCode).emit('match_code_error', {
+                    player: 'blue',
+                    name: room.blue.name,
+                    error: bluePrep.error
+                });
             }
             room.blue.handler = bluePrep.botHandler;
 
@@ -302,16 +308,40 @@ io.on('connection', (socket) => {
             if (!redPrep.success) {
                 room.red.ready = false;
                 io.to(roomCode).emit('room_updated', getRoomPublicState(room));
-                return io.to(roomCode).emit('match_error', `[Đội Đỏ] ${redPrep.error}`);
+                return io.to(roomCode).emit('match_code_error', {
+                    player: 'red',
+                    name: room.red.name,
+                    error: redPrep.error
+                });
             }
             room.red.handler = redPrep.botHandler;
 
-            // Start battle loop!
-            startOnlineMatch(room);
+            // Both bots compiled successfully! Notify countdown then start battle
+            io.to(roomCode).emit('match_validated', '✅ Code của cả 2 bên hợp lệ! Chuẩn bị thi đấu trong 3 giây...');
+            setTimeout(() => {
+                if (rooms.has(roomCode) && room.gameActive === false) {
+                    startOnlineMatch(room);
+                }
+            }, 2500);
         }
     });
 
-    // 4. Leave Room
+    // 4. Request Rematch (Reset submission state for new round)
+    socket.on('request_rematch', () => {
+        const roomCode = socket.roomCode;
+        if (!roomCode || !rooms.has(roomCode)) return;
+        const room = rooms.get(roomCode);
+
+        room.gameActive = false;
+        if (room.stepTimer) clearTimeout(room.stepTimer);
+        if (room.blue) room.blue.ready = false;
+        if (room.red) room.red.ready = false;
+
+        io.to(roomCode).emit('room_updated', getRoomPublicState(room));
+        io.to(roomCode).emit('rematch_ready', 'Ván đấu mới sẵn sàng! Hãy chỉnh sửa code và bấm "Nộp Code" để thi đấu lại.');
+    });
+
+    // 5. Leave Room
     socket.on('leave_room', () => {
         handleUserLeave(socket);
     });

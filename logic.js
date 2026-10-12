@@ -1610,6 +1610,8 @@
 
     // ===== Realtime Online Multiplayer (Socket.io) =====
 
+    // ===== Realtime Online Multiplayer (Socket.io) =====
+
     function initOnlineSocket() {
         if (typeof io !== 'function') return;
         try {
@@ -1625,19 +1627,68 @@
                 currentOnlineRoom = data.roomCode;
                 myOnlineSlot = data.slot;
                 showLobbyView(data.roomCode, data.roomState);
+                enterOnlineMode(data.roomCode, data.slot, data.roomState);
             });
             socket.on('room_joined', (data) => {
                 currentOnlineRoom = data.roomCode;
                 myOnlineSlot = data.slot;
                 showLobbyView(data.roomCode, data.roomState);
+                enterOnlineMode(data.roomCode, data.slot, data.roomState);
             });
             socket.on('room_updated', (roomState) => {
                 updateLobbyState(roomState);
+                updateOnlineActiveBar(roomState);
+            });
+            socket.on('player_submitted', (data) => {
+                const isMe = data.player === myOnlineSlot;
+                const pName = data.name || (data.player === 'blue' ? 'Đội Xanh' : 'Đội Đỏ');
+                if (isMe) {
+                    updateStatusTicker("✅ Bạn đã nộp code thành công! Đang chờ đối thủ nộp code...");
+                } else {
+                    updateStatusTicker(`📢 Đối thủ (${pName}) đã nộp code xong! Đến lượt bạn bấm "Nộp Code" để bắt đầu thi đấu.`);
+                    const subText = document.getElementById('oab-status-text');
+                    if (subText) subText.textContent = `📢 Đối thủ (${pName}) đã nộp code! Hãy bấm "Nộp Code" để bắt đầu ván đấu.`;
+                }
             });
             socket.on('match_preparing', (msg) => {
                 const st = document.getElementById('online-sync-status');
                 if (st) st.textContent = msg;
+                const subText = document.getElementById('oab-status-text');
+                if (subText) subText.textContent = msg;
                 updateStatusTicker(msg);
+                const submitBtn = document.getElementById('online-submit-code-btn');
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = '⏳ Đang kiểm tra code...';
+                }
+            });
+            socket.on('match_code_error', (data) => {
+                const submitBtn = document.getElementById('online-submit-code-btn');
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '📤 Sửa & Nộp Lại Code';
+                    submitBtn.classList.remove('submitted');
+                }
+                const subText = document.getElementById('oab-status-text');
+                if (data.player === myOnlineSlot) {
+                    alert(`❌ LỖI KIỂM TRA / BIÊN DỊCH CODE CỦA BẠN:\n\n${data.error}\n\nVui lòng kiểm tra lại cú pháp, sửa code và bấm "Nộp Code" lại!`);
+                    updateStatusTicker(`❌ Lỗi code của bạn: ${data.error.slice(0, 120)}`);
+                    if (subText) subText.textContent = `❌ Code của bạn bị lỗi! Hãy sửa code và bấm "Nộp Code" lại.`;
+                    playSound('error');
+                } else {
+                    updateStatusTicker(`⚠️ Đối thủ (${data.name}) bị lỗi code khi kiểm tra! Đang chờ đối thủ sửa code và nộp lại...`);
+                    if (subText) subText.textContent = `⚠️ Đối thủ (${data.name}) bị lỗi code! Đang chờ đối thủ sửa và nộp lại...`;
+                }
+            });
+            socket.on('match_validated', (msg) => {
+                const subText = document.getElementById('oab-status-text');
+                if (subText) subText.textContent = msg;
+                updateStatusTicker(msg);
+                const submitBtn = document.getElementById('online-submit-code-btn');
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = '⚔️ Bắt đầu thi đấu!';
+                }
             });
             socket.on('match_started', (data) => {
                 hideOnlineModal();
@@ -1655,6 +1706,8 @@
                 updateMaterialPanels();
                 clearMoveLedger();
                 updateStatusTicker(`⚔️ Trận đấu Online bắt đầu! ${data.blue.name} (Xanh) vs ${data.red.name} (Đỏ)`);
+                const subText = document.getElementById('oab-status-text');
+                if (subText) subText.textContent = `⚔️ Trận đấu đang diễn ra trực tiếp!`;
             });
             socket.on('online_move_made', (data) => {
                 const m = data.moveRecord;
@@ -1691,7 +1744,32 @@
                 if (data.eloOutcome && data.eloOutcome.updatedLeaderboard) {
                     renderLeaderboard(data.eloOutcome.updatedLeaderboard);
                 }
+                unlockAllEditors();
+                const submitBtn = document.getElementById('online-submit-code-btn');
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '📤 Nộp Code Ván Mới';
+                    submitBtn.classList.remove('submitted');
+                }
+                const subText = document.getElementById('oab-status-text');
+                if (subText) subText.textContent = `Trận đấu kết thúc! Bạn có thể xem code đối thủ hoặc bấm "Nộp Code" để thi đấu ván mới.`;
                 showWinModal(data.winner, data.reason, data.eloOutcome);
+            });
+            socket.on('rematch_ready', (msg) => {
+                resetBattle();
+                unlockAllEditors();
+                applyOnlineEditorSecurity(myOnlineSlot);
+                const submitBtn = document.getElementById('online-submit-code-btn');
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '📤 Nộp Code Thi Đấu';
+                    submitBtn.classList.remove('submitted');
+                }
+                const readyBtn = document.getElementById('online-ready-btn');
+                if (readyBtn) readyBtn.textContent = '📤 Nộp Code Hiện Tại';
+                updateStatusTicker(msg);
+                const subText = document.getElementById('oab-status-text');
+                if (subText) subText.textContent = msg;
             });
             socket.on('match_error', (err) => {
                 alert(err);
@@ -1733,6 +1811,199 @@
         updateLobbyState(roomState);
     }
 
+    function enterOnlineMode(roomCode, slot, roomState) {
+        const oab = document.getElementById('online-active-bar');
+        if (oab) oab.style.display = 'flex';
+
+        const codeEl = document.getElementById('oab-room-code');
+        if (codeEl) codeEl.textContent = roomCode;
+
+        const roleEl = document.getElementById('oab-my-role');
+        if (roleEl) {
+            roleEl.textContent = slot === 'blue' ? '🔵 Đội Xanh (Blue)' : '🔴 Đội Đỏ (Red)';
+            roleEl.style.color = slot === 'blue' ? '#1d4ed8' : '#b91c1c';
+        }
+
+        // Switch to the player's editor tab
+        const targetTab = slot === 'blue' ? 'tab-blue-bot' : 'tab-red-bot';
+        document.querySelectorAll('.studio-tab-btn').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.studio-tab-pane').forEach(p => p.classList.remove('active'));
+        const tabBtn = document.querySelector(`.studio-tab-btn[data-tab="${targetTab}"]`);
+        if (tabBtn) tabBtn.classList.add('active');
+        const pane = document.getElementById(targetTab);
+        if (pane) pane.classList.add('active');
+        if (slot === 'blue' && editorBlue) editorBlue.resize();
+        if (slot === 'red' && editorRed) editorRed.resize();
+
+        // Apply opponent editor lock overlay to protect strategy
+        applyOnlineEditorSecurity(slot);
+
+        // Disable offline controls
+        const startBtn = document.getElementById('battle-start-btn');
+        const stepBtn = document.getElementById('battle-step-btn');
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.title = 'Đang trong phòng đấu online. Hãy bấm "Nộp Code" để thi đấu!';
+        }
+        if (stepBtn) stepBtn.disabled = true;
+
+        // Reset submit button state
+        const submitBtn = document.getElementById('online-submit-code-btn');
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = '📤 Nộp Code Thi Đấu';
+            submitBtn.classList.remove('submitted');
+        }
+
+        updateOnlineActiveBar(roomState);
+        updateStatusTicker(`🌐 Đã kết nối phòng ${roomCode}! Hãy chỉnh sửa code bot của bạn và bấm "Nộp Code" khi hoàn tất.`);
+    }
+
+    function applyOnlineEditorSecurity(mySlot) {
+        unlockAllEditors();
+        if (mySlot === 'blue') {
+            if (editorBlue) editorBlue.setReadOnly(false);
+            if (editorRed) editorRed.setReadOnly(true);
+            const redContainer = document.getElementById('editor-red');
+            if (redContainer && !document.getElementById('red-editor-lock')) {
+                const overlay = document.createElement('div');
+                overlay.className = 'editor-locked-overlay';
+                overlay.id = 'red-editor-lock';
+                overlay.innerHTML = `
+                    <div class="editor-locked-icon">🔒</div>
+                    <div class="editor-locked-title">BẢO MẬT CODE ĐỐI THỦ</div>
+                    <div class="editor-locked-desc">Code của Đội Đỏ (Đối thủ) được giữ bí mật trong thời gian viết code. Sau khi cả 2 nộp code và bắt đầu đấu, bạn sẽ thấy kết quả thi đấu!</div>
+                `;
+                redContainer.style.position = 'relative';
+                redContainer.appendChild(overlay);
+            }
+        } else if (mySlot === 'red') {
+            if (editorRed) editorRed.setReadOnly(false);
+            if (editorBlue) editorBlue.setReadOnly(true);
+            const blueContainer = document.getElementById('editor-blue');
+            if (blueContainer && !document.getElementById('blue-editor-lock')) {
+                const overlay = document.createElement('div');
+                overlay.className = 'editor-locked-overlay';
+                overlay.id = 'blue-editor-lock';
+                overlay.innerHTML = `
+                    <div class="editor-locked-icon">🔒</div>
+                    <div class="editor-locked-title">BẢO MẬT CODE ĐỐI THỦ</div>
+                    <div class="editor-locked-desc">Code của Đội Xanh (Đối thủ) được giữ bí mật trong thời gian viết code. Sau khi cả 2 nộp code và bắt đầu đấu, bạn sẽ thấy kết quả thi đấu!</div>
+                `;
+                blueContainer.style.position = 'relative';
+                blueContainer.appendChild(overlay);
+            }
+        }
+    }
+
+    function unlockAllEditors() {
+        if (editorBlue) editorBlue.setReadOnly(false);
+        if (editorRed) editorRed.setReadOnly(false);
+        const l1 = document.getElementById('red-editor-lock');
+        if (l1) l1.remove();
+        const l2 = document.getElementById('blue-editor-lock');
+        if (l2) l2.remove();
+    }
+
+    function updateOnlineActiveBar(roomState) {
+        if (!roomState) return;
+        const bStatus = document.getElementById('oab-blue-status');
+        const rStatus = document.getElementById('oab-red-status');
+
+        if (bStatus) {
+            if (roomState.blue) {
+                if (roomState.blue.ready) {
+                    bStatus.textContent = `🔵 ${roomState.blue.name}: ĐÃ NỘP ✓`;
+                    bStatus.className = 'oab-pill ready';
+                } else {
+                    bStatus.textContent = `🔵 ${roomState.blue.name}: Đang viết code...`;
+                    bStatus.className = 'oab-pill waiting';
+                }
+            } else {
+                bStatus.textContent = '🔵 Xanh: Chờ người chơi...';
+                bStatus.className = 'oab-pill waiting';
+            }
+        }
+
+        if (rStatus) {
+            if (roomState.red) {
+                if (roomState.red.ready) {
+                    rStatus.textContent = `🔴 ${roomState.red.name}: ĐÃ NỘP ✓`;
+                    rStatus.className = 'oab-pill ready';
+                } else {
+                    rStatus.textContent = `🔴 ${roomState.red.name}: Đang viết code...`;
+                    rStatus.className = 'oab-pill waiting';
+                }
+            } else {
+                rStatus.textContent = '🔴 Đỏ: Chờ người chơi...';
+                rStatus.className = 'oab-pill waiting';
+            }
+        }
+    }
+
+    function submitOnlineCode() {
+        if (!socket || !currentOnlineRoom || !myOnlineSlot) {
+            alert("Bạn chưa tham gia phòng online nào!");
+            return;
+        }
+
+        const code = myOnlineSlot === 'blue'
+            ? (editorBlue ? editorBlue.getValue() : '')
+            : (editorRed ? editorRed.getValue() : '');
+
+        const lang = myOnlineSlot === 'blue' ? blueLang : redLang;
+        const name = currentPlayerProfile ? currentPlayerProfile.name : 'Người chơi';
+
+        socket.emit('player_ready', { code, lang, name });
+
+        const submitBtn = document.getElementById('online-submit-code-btn');
+        if (submitBtn) {
+            submitBtn.textContent = '🔄 Cập Nhật & Nộp Lại Code';
+            submitBtn.classList.add('submitted');
+        }
+
+        const readyBtn = document.getElementById('online-ready-btn');
+        if (readyBtn) {
+            readyBtn.textContent = '🔄 Cập Nhật & Nộp Lại Code';
+        }
+
+        const subText = document.getElementById('oab-status-text');
+        if (subText) subText.textContent = '✅ Bạn đã nộp code! Đang chờ đối thủ nộp code...';
+
+        updateStatusTicker('✅ Bạn đã nộp code thành công! Trận đấu sẽ tự động kiểm tra code và chạy khi đối thủ cũng nộp.');
+        playSound('move');
+    }
+
+    function exitOnlineRoom() {
+        if (socket) socket.emit('leave_room');
+        currentOnlineRoom = null;
+        myOnlineSlot = null;
+        isOnlineMatch = false;
+
+        const oab = document.getElementById('online-active-bar');
+        if (oab) oab.style.display = 'none';
+
+        const lobby = document.getElementById('online-room-lobby');
+        const nav = document.getElementById('online-tab-nav');
+        const createView = document.getElementById('online-view-create');
+        if (lobby) lobby.style.display = 'none';
+        if (nav) nav.style.display = 'flex';
+        if (createView) createView.style.display = 'block';
+
+        unlockAllEditors();
+
+        const startBtn = document.getElementById('battle-start-btn');
+        const stepBtn = document.getElementById('battle-step-btn');
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.title = '';
+        }
+        if (stepBtn) stepBtn.disabled = false;
+
+        hideOnlineModal();
+        updateStatusTicker("Đã rời phòng online. Quay lại chế độ ngoại tuyến.");
+    }
+
     function updateLobbyState(roomState) {
         if (!roomState) return;
         const bName = document.getElementById('lobby-blue-name');
@@ -1750,7 +2021,7 @@
                 bLang.className = `lang-pill ${roomState.blue.lang}`;
             }
             if (bStatus) {
-                bStatus.textContent = roomState.blue.ready ? '✓ Đã sẵn sàng' : 'Chờ sẵn sàng';
+                bStatus.textContent = roomState.blue.ready ? '✓ Đã nộp code' : 'Chưa nộp code';
                 bStatus.className = `slot-ready-tag ${roomState.blue.ready ? 'ready' : 'waiting'}`;
             }
         } else {
@@ -1765,7 +2036,7 @@
                 rLang.className = `lang-pill ${roomState.red.lang}`;
             }
             if (rStatus) {
-                rStatus.textContent = roomState.red.ready ? '✓ Đã sẵn sàng' : 'Chờ sẵn sàng';
+                rStatus.textContent = roomState.red.ready ? '✓ Đã nộp code' : 'Chưa nộp code';
                 rStatus.className = `slot-ready-tag ${roomState.red.ready ? 'ready' : 'waiting'}`;
             }
         } else {
@@ -2017,38 +2288,36 @@
             });
         }
 
-        const onlineReadyBtn = document.getElementById('online-ready-btn');
-        if (onlineReadyBtn) {
-            onlineReadyBtn.addEventListener('click', () => {
-                if (!socket || !currentOnlineRoom) return;
-                const code = myOnlineSlot === 'blue' 
-                    ? (editorBlue ? editorBlue.getValue() : '')
-                    : (editorRed ? editorRed.getValue() : '');
-                const lang = myOnlineSlot === 'blue' ? blueLang : redLang;
-                socket.emit('player_ready', {
-                    code,
-                    lang,
-                    name: currentPlayerProfile ? currentPlayerProfile.name : 'Người chơi'
-                });
-                onlineReadyBtn.textContent = '⏳ Đang chờ đối thủ...';
+        // Online Active Bar Buttons
+        const onlineSubmitBtn = document.getElementById('online-submit-code-btn');
+        if (onlineSubmitBtn) onlineSubmitBtn.addEventListener('click', submitOnlineCode);
+
+        const onlineExitBtn = document.getElementById('online-exit-room-btn');
+        if (onlineExitBtn) onlineExitBtn.addEventListener('click', exitOnlineRoom);
+
+        const oabCopyBtn = document.getElementById('oab-copy-btn');
+        if (oabCopyBtn) {
+            oabCopyBtn.addEventListener('click', () => {
+                if (currentOnlineRoom) {
+                    navigator.clipboard.writeText(currentOnlineRoom).then(() => {
+                        alert(`Đã sao chép mã phòng: ${currentOnlineRoom}`);
+                    });
+                }
             });
         }
 
-        const leaveRoomBtn = document.getElementById('online-leave-room-btn');
-        if (leaveRoomBtn) {
-            leaveRoomBtn.addEventListener('click', () => {
-                if (socket) socket.emit('leave_room');
-                currentOnlineRoom = null;
-                myOnlineSlot = null;
-                const lobby = document.getElementById('online-room-lobby');
-                const nav = document.getElementById('online-tab-nav');
-                const createView = document.getElementById('online-view-create');
-                if (lobby) lobby.style.display = 'none';
-                if (nav) nav.style.display = 'flex';
-                if (createView) createView.style.display = 'block';
+        const onlineGoCodeBtn = document.getElementById('online-go-code-btn');
+        if (onlineGoCodeBtn) {
+            onlineGoCodeBtn.addEventListener('click', () => {
                 hideOnlineModal();
             });
         }
+
+        const onlineReadyBtn = document.getElementById('online-ready-btn');
+        if (onlineReadyBtn) onlineReadyBtn.addEventListener('click', submitOnlineCode);
+
+        const leaveRoomBtn = document.getElementById('online-leave-room-btn');
+        if (leaveRoomBtn) leaveRoomBtn.addEventListener('click', exitOnlineRoom);
 
         // Export & Import Bot Code
         const exportBlue = document.getElementById('export-blue-btn');
@@ -2143,10 +2412,17 @@
             });
         }
 
-        // Win Modal Reset
+        // Win Modal Reset & Online Rematch
         const winDismiss = document.querySelector('.win-dismiss');
         if (winDismiss) {
-            winDismiss.addEventListener('click', resetBattle);
+            winDismiss.addEventListener('click', () => {
+                if (currentOnlineRoom && socket) {
+                    socket.emit('request_rematch');
+                    hideWinModal();
+                } else {
+                    resetBattle();
+                }
+            });
         }
     }
 
