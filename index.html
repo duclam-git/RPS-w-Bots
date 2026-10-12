@@ -15,6 +15,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/theme-monokai.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/mode-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/mode-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/mode-c_cpp.min.js"></script>
+    
+    <!-- Socket.io for Realtime Online Multiplayer -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
     
     <link rel="stylesheet" href="style.css">
 </head>
@@ -61,6 +66,16 @@
                         </select>
                     </div>
                 </div>
+
+                <!-- Profile & Theme Toggles -->
+                <div class="header-meta-group">
+                    <button id="profile-open-btn" class="profile-btn" title="Hồ sơ & Điểm Elo của bạn">
+                        👤 <span id="header-player-name">Người chơi</span> (<strong id="header-player-elo">1200</strong>)
+                    </button>
+                    <button id="theme-toggle-btn" class="theme-toggle-btn" title="Chuyển chế độ ban đêm/ban ngày">
+                        🌙 Ban đêm
+                    </button>
+                </div>
             </div>
 
             <!-- Controls Toolbar -->
@@ -69,6 +84,7 @@
                     <button class="preset-mode-btn active" data-mode="bot-vs-bot" title="Đấu Bot với Tactical AI">🤖 Bot vs AI</button>
                     <button class="preset-mode-btn" data-mode="human-vs-bot" title="Tự mình chơi đấu với Bot">👤 Đấu với Bot</button>
                     <button class="preset-mode-btn" data-mode="bot-vs-bot-mirror" title="Hai bot tự code đấu nhau">🤖 Bot vs Bot</button>
+                    <button class="preset-mode-btn btn-online-mode" id="open-online-modal-btn" title="Thi đấu Online giữa 2 máy khác nhau">🌐 Đấu Online</button>
                 </div>
 
                 <div class="battle-controls">
@@ -167,10 +183,13 @@
                 <!-- Studio Navigation Tabs -->
                 <div class="studio-tabs-bar">
                     <button class="studio-tab-btn active" data-tab="tab-blue-bot">
-                        <span class="tab-dot blue-tab-dot"></span> BlueBot.js
+                        <span class="tab-dot blue-tab-dot"></span> BlueBot
                     </button>
                     <button class="studio-tab-btn" data-tab="tab-red-bot">
-                        <span class="tab-dot red-tab-dot"></span> RedBot.js
+                        <span class="tab-dot red-tab-dot"></span> RedBot
+                    </button>
+                    <button class="studio-tab-btn" data-tab="tab-leaderboard">
+                        🏆 Bảng Xếp Hạng
                     </button>
                     <button class="studio-tab-btn" data-tab="tab-console">
                         📟 Bot Console <span class="tab-badge" id="console-log-count">0</span>
@@ -187,12 +206,20 @@
                 <div class="studio-tab-pane active" id="tab-blue-bot">
                     <div class="editor-toolbar">
                         <div class="toolbar-left">
-                            <label for="template-select-blue">⚡ Nạp mẫu Bot:</label>
+                            <div class="lang-select-group">
+                                <label for="blue-lang-select">Ngôn ngữ:</label>
+                                <select id="blue-lang-select" class="lang-select">
+                                    <option value="javascript" selected>JS (.js)</option>
+                                    <option value="python">Python (.py)</option>
+                                    <option value="cpp">C++ (.cpp)</option>
+                                </select>
+                            </div>
+                            <label for="template-select-blue">⚡ Mẫu Bot:</label>
                             <select id="template-select-blue" class="template-dropdown">
                                 <option value="" disabled selected>-- Chọn chiến thuật --</option>
-                                <option value="starterBlue">Mẫu Cơ Bản (Starter Blue)</option>
+                                <option value="starterBlue">Mẫu Cơ Bản</option>
                                 <option value="rusher">Goal Rusher (Lao về I9)</option>
-                                <option value="hunter">Aggressive Hunter (Đồ sát diệt chủng)</option>
+                                <option value="hunter">Aggressive Hunter (Tiêu diệt)</option>
                                 <option value="tactical">Tactical AI (Minimax cân bằng)</option>
                                 <option value="random">Random Bot (Ngẫu nhiên)</option>
                             </select>
@@ -200,16 +227,16 @@
                         <div class="toolbar-right">
                             <button id="copy-blue-btn" class="tb-btn" title="Sao chép code">📋 Copy</button>
                             <button id="reset-blue-btn" class="tb-btn" title="Khôi phục code mặc định">🔄 Reset</button>
-                            <button id="export-blue-btn" class="tb-btn" title="Tải file .js về máy">⬇ Xuất</button>
-                            <label class="tb-btn tb-file-label" title="Nạp file .js từ máy">
+                            <button id="export-blue-btn" class="tb-btn" title="Tải file về máy">⬇ Xuất</button>
+                            <label class="tb-btn tb-file-label" title="Nạp file từ máy">
                                 ⬆ Nạp
-                                <input type="file" id="import-blue-file" accept=".js,.txt" style="display:none;">
+                                <input type="file" id="import-blue-file" accept=".js,.py,.cpp,.txt" style="display:none;">
                             </label>
                         </div>
                     </div>
                     <div class="editor-container" id="editor-blue"></div>
                     <div class="editor-statusbar">
-                        <span>Lập trình hàm <code>getNextMove(state, helpers, log)</code> cho Đội Xanh (Mục tiêu: Đưa quân tới ô I9 ở phía bên kia bàn cờ)</span>
+                        <span id="blue-editor-hint">Lập trình bot cho Đội Xanh (Mục tiêu: Đưa quân tới ô I9 ở phía bên kia bàn cờ)</span>
                         <span class="auto-save-tag">Tự động lưu vào trình duyệt ✓</span>
                     </div>
                 </div>
@@ -218,12 +245,20 @@
                 <div class="studio-tab-pane" id="tab-red-bot">
                     <div class="editor-toolbar">
                         <div class="toolbar-left">
-                            <label for="template-select-red">⚡ Nạp mẫu Bot:</label>
+                            <div class="lang-select-group">
+                                <label for="red-lang-select">Ngôn ngữ:</label>
+                                <select id="red-lang-select" class="lang-select">
+                                    <option value="javascript" selected>JS (.js)</option>
+                                    <option value="python">Python (.py)</option>
+                                    <option value="cpp">C++ (.cpp)</option>
+                                </select>
+                            </div>
+                            <label for="template-select-red">⚡ Mẫu Bot:</label>
                             <select id="template-select-red" class="template-dropdown">
                                 <option value="" disabled selected>-- Chọn chiến thuật --</option>
-                                <option value="starterRed">Mẫu Cơ Bản (Starter Red)</option>
+                                <option value="starterRed">Mẫu Cơ Bản</option>
                                 <option value="rusher">Goal Rusher (Lao về A1)</option>
-                                <option value="hunter">Aggressive Hunter (Tiêu diệt cản đường)</option>
+                                <option value="hunter">Aggressive Hunter (Tiêu diệt)</option>
                                 <option value="tactical">Tactical AI (Minimax cân bằng)</option>
                                 <option value="random">Random Bot (Ngẫu nhiên)</option>
                             </select>
@@ -231,17 +266,49 @@
                         <div class="toolbar-right">
                             <button id="copy-red-btn" class="tb-btn" title="Sao chép code">📋 Copy</button>
                             <button id="reset-red-btn" class="tb-btn" title="Khôi phục code mặc định">🔄 Reset</button>
-                            <button id="export-red-btn" class="tb-btn" title="Tải file .js về máy">⬇ Xuất</button>
-                            <label class="tb-btn tb-file-label" title="Nạp file .js từ máy">
+                            <button id="export-red-btn" class="tb-btn" title="Tải file về máy">⬇ Xuất</button>
+                            <label class="tb-btn tb-file-label" title="Nạp file từ máy">
                                 ⬆ Nạp
-                                <input type="file" id="import-red-file" accept=".js,.txt" style="display:none;">
+                                <input type="file" id="import-red-file" accept=".js,.py,.cpp,.txt" style="display:none;">
                             </label>
                         </div>
                     </div>
                     <div class="editor-container" id="editor-red"></div>
                     <div class="editor-statusbar">
-                        <span>Lập trình hàm <code>getNextMove(state, helpers, log)</code> cho Đội Đỏ (Mục tiêu: Đưa quân tới ô A1 ở phía bên kia bàn cờ)</span>
+                        <span id="red-editor-hint">Lập trình bot cho Đội Đỏ (Mục tiêu: Đưa quân tới ô A1 ở phía bên kia bàn cờ)</span>
                         <span class="auto-save-tag">Tự động lưu vào trình duyệt ✓</span>
+                    </div>
+                </div>
+
+                <!-- Tab: Leaderboard -->
+                <div class="studio-tab-pane" id="tab-leaderboard">
+                    <div class="leaderboard-pane">
+                        <div class="leaderboard-header">
+                            <div class="leaderboard-title">
+                                <span>🏆 BẢNG XẾP HẠNG ELO</span>
+                            </div>
+                            <div class="leaderboard-user-card" id="user-rank-status">
+                                <span>Bạn: <strong id="lb-user-name">Người chơi</strong> (<strong id="lb-user-elo">1200</strong> Elo)</span>
+                            </div>
+                        </div>
+                        <div class="leaderboard-table-wrap">
+                            <table class="leaderboard-table">
+                                <thead>
+                                    <tr>
+                                        <th>Hạng</th>
+                                        <th>Kỳ thủ / Bot</th>
+                                        <th>Điểm Elo</th>
+                                        <th>Ngôn ngữ</th>
+                                        <th>Trận</th>
+                                        <th>Thắng/Thua/Hòa</th>
+                                        <th>Thắng %</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="leaderboard-body">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -396,8 +463,97 @@
                 <h2 id="win-title">🏆 Chiến Thắng!</h2>
                 <p id="win-reason" class="win-reason"></p>
                 <div id="win-stats" class="win-stats-box"></div>
+                <div id="win-elo-box"></div>
                 <div class="win-actions">
                     <button class="win-dismiss action-btn btn-primary">Chơi ván mới</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Player Profile Modal -->
+        <div class="modal-backdrop" id="player-profile-modal" style="display:none;">
+            <div class="modal-box">
+                <div class="modal-header">
+                    <h3>👤 Hồ Sơ Người Chơi</h3>
+                    <button id="close-profile-modal-btn" class="close-modal-btn">&times;</button>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="input-player-name">Tên / Nickname của bạn:</label>
+                    <input type="text" id="input-player-name" class="form-input" placeholder="Ví dụ: MinhCode, MasterAI..." maxlength="20">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="select-preferred-lang">Ngôn ngữ lập trình chính:</label>
+                    <select id="select-preferred-lang" class="form-input">
+                        <option value="javascript">JavaScript (.js)</option>
+                        <option value="python">Python (.py)</option>
+                        <option value="cpp">C++ (.cpp)</option>
+                    </select>
+                </div>
+                <div class="win-stats-box" id="profile-stats-box"></div>
+                <button id="save-profile-btn" class="action-btn btn-primary">💾 Lưu hồ sơ</button>
+            </div>
+        </div>
+
+        <!-- Online Matchmaking Modal -->
+        <div class="modal-backdrop" id="online-match-modal" style="display:none;">
+            <div class="modal-box">
+                <div class="modal-header">
+                    <h3>🌐 Đấu Trường Online (2 Máy)</h3>
+                    <button id="close-online-modal-btn" class="close-modal-btn">&times;</button>
+                </div>
+                <div class="online-tabs" id="online-tab-nav">
+                    <button class="online-tab-btn active" data-tab="online-view-create">Tạo phòng mới</button>
+                    <button class="online-tab-btn" data-tab="online-view-join">Vào phòng có sẵn</button>
+                </div>
+                
+                <!-- Tab Create Room -->
+                <div id="online-view-create" class="online-view">
+                    <p style="font-size:0.85rem; color:var(--theme-ink-muted); margin-bottom:12px;">
+                        Tạo một phòng thi đấu để nhận mã phòng chia sẻ cho đối thủ trên máy tính khác cùng thi đấu!
+                    </p>
+                    <button id="online-create-room-btn" class="action-btn btn-primary" style="width:100%;">⚡ Tạo Mã Phòng Mới</button>
+                </div>
+
+                <!-- Tab Join Room -->
+                <div id="online-view-join" class="online-view" style="display:none;">
+                    <div class="form-group">
+                        <label class="form-label" for="online-join-code-input">Nhập Mã Phòng (VD: OTT-7291):</label>
+                        <input type="text" id="online-join-code-input" class="form-input" placeholder="Mã phòng..." style="text-transform:uppercase; font-size:1.15rem; text-align:center; letter-spacing:2px;">
+                    </div>
+                    <button id="online-join-room-btn" class="action-btn btn-primary" style="width:100%; margin-top:8px;">🚀 Tham Gia Phòng</button>
+                </div>
+
+                <!-- Room Lobby View -->
+                <div id="online-room-lobby" style="display:none; flex-direction:column; gap:12px;">
+                    <div class="room-code-display">
+                        <span style="font-size:0.8rem; font-weight:700;">MÃ PHÒNG THI ĐẤU:</span>
+                        <span id="room-pin-label" class="room-pin">OTT-XXXX</span>
+                        <span style="font-size:0.75rem; color:var(--theme-ink-muted);">Gửi mã này cho bạn bè ở máy khác để cùng so tài code!</span>
+                    </div>
+
+                    <div class="room-slots">
+                        <div class="room-slot-card blue-slot">
+                            <strong style="color:var(--theme-blue);">🔵 ĐỘI XANH (Host)</strong>
+                            <span id="lobby-blue-name">Đang chờ...</span>
+                            <div><span id="lobby-blue-lang" class="lang-pill js">JS</span></div>
+                            <div><span id="lobby-blue-status" class="slot-ready-tag waiting">Chờ sẵn sàng</span></div>
+                        </div>
+                        <div class="room-slot-card red-slot">
+                            <strong style="color:var(--theme-red);">🔴 ĐỘI ĐỎ (Khách)</strong>
+                            <span id="lobby-red-name">Đang chờ...</span>
+                            <div><span id="lobby-red-lang" class="lang-pill js">JS</span></div>
+                            <div><span id="lobby-red-status" class="slot-ready-tag waiting">Chờ sẵn sàng</span></div>
+                        </div>
+                    </div>
+
+                    <div id="online-sync-status" style="font-size:0.8rem; font-weight:700; text-align:center; color:var(--theme-ink-muted);">
+                        Chờ cả hai người chơi bấm Sẵn Sàng để bắt đầu...
+                    </div>
+
+                    <div style="display:flex; gap:8px; margin-top:6px;">
+                        <button id="online-ready-btn" class="action-btn btn-primary" style="flex:1;">✓ Sẵn Sàng Đấu</button>
+                        <button id="online-leave-room-btn" class="action-btn btn-secondary">Rời phòng</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -453,6 +609,8 @@
     </div>
 
     <!-- Scripts -->
+    <script src="elo.js"></script>
+    <script src="bot_templates.js"></script>
     <script src="bots.js"></script>
     <script src="logic.js"></script>
 </body>

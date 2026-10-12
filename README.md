@@ -95,9 +95,35 @@ log("Đang săn quân Kéo của đối thủ:", bestMove.notation);
 
 ## ⚡ Tính năng nổi bật
 
-- 💻 **In-Browser Code Editor:** Tích hợp trình soạn thảo code Ace Editor trực tiếp trên web với phím tắt, tô màu cú pháp, định dạng chuẩn.
-- 💾 **Tự động lưu & Xuất/Nạp file:** Code của bạn tự động lưu vào trình duyệt (localStorage), hỗ trợ xuất file `.js` và nạp file từ máy.
-- ⏯️ **Điều khiển trận đấu linh hoạt:** Chạy tự động (Run), Tạm dừng (Pause), Đi từng bước (Step), Điều chỉnh tốc độ từ 800ms đến 5ms.
-- 📊 **Benchmark Simulator (50x):** Chạy giải đấu 10, 50, hoặc 100 trận siêu tốc không giao diện để đo chính xác tỉ lệ thắng (% Win Rate) và chiến thuật thắng.
-- 🎮 **Chế độ chơi đa dạng:** Bot vs Bot, Người đấu với Bot (Human vs Bot), Bot tự đấu chính nó.
-- 🔊 **Hiệu ứng âm thanh:** Tích hợp âm thanh Web Audio sống động khi đi cờ, ăn quân và chiến thắng.
+- 🌐 **Đấu Online Giữa 2 Máy (Multiplayer 1v1):** Hỗ trợ 2 người chơi ở 2 máy tính khác nhau kết nối qua mã phòng (Room Code), cùng nạp code và so tài trực tiếp theo thời gian thực qua WebSocket.
+- 💻 **Đa Ngôn Ngữ & Đấu Chéo Ngôn Ngữ (Cross-Language Arena):**
+  - Hỗ trợ **JavaScript (.js)**, **Python (.py)** và **C++17 (.cpp)** trên trình soạn thảo Ace Editor.
+  - Hỗ trợ các cuộc đấu không cùng ngôn ngữ (ví dụ: một bên dùng file Python đấu với một bên dùng C++).
+  - Trọng tài Server biên dịch và thực thi code an toàn với timeout quy chuẩn.
+- 🌙 **Chế độ Ban Đêm (Dark Mode):** Giao diện Dark Theme hiện đại, dịu mắt, độ tương phản cao, tự động chuyển đổi theme Ace Editor và lưu trạng thái vào trình duyệt.
+- 🏆 **Bảng Xếp Hạng & Hệ Thống Điểm Elo (FIDE Rating):**
+  - Bắt buộc nhập tên người chơi trước khi đấu.
+  - Công thức tính điểm Elo chuẩn cờ vua (khởi đầu 1200 điểm, K-factor = 32).
+  - Bảng xếp hạng vinh danh Top người chơi kèm huy chương 🥇🥈🥉, thống kê số trận, tỷ lệ thắng.
+- 💾 **Tự động lưu & Xuất/Nạp file:** Tự động lưu theo từng ngôn ngữ, hỗ trợ xuất và nạp file `.js`, `.py`, `.cpp`.
+- ⏯️ **Điều khiển trận đấu linh hoạt:** Chạy tự động, Tạm dừng, Đi từng bước, Điều chỉnh tốc độ từ 800ms đến 5ms.
+- 📊 **Benchmark Simulator (50x):** Chạy giải đấu 50 hoặc 100 trận siêu tốc để đo tỉ lệ thắng bot.
+- 🔊 **Hiệu ứng âm thanh:** Web Audio sống động khi đi cờ, ăn quân và chiến thắng.
+
+---
+
+## 🚀 Hướng Dẫn Chạy Dự Án
+
+### Chạy Server để đấu Online và hỗ trợ Python / C++:
+```bash
+# Di chuyển vào thư mục dự án
+cd RPS-w-Bots
+
+# Cài đặt thư viện (nếu chưa cài)
+npm install
+
+# Khởi động server
+npm start
+```
+Truy cập trình duyệt: **`http://localhost:3000`** (hoặc `http://<dia_chi_ip_lan>:3000` từ máy tính khác trong cùng mạng LAN / Wi-Fi để cùng đấu Online).
+

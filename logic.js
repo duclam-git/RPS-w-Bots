@@ -164,9 +164,19 @@
     let botLogs = [];
     let activeConsoleFilter = 'all';
 
-    // Ace Editors
+    // Ace Editors & Multi-Language
     let editorBlue = null;
     let editorRed = null;
+    let blueLang = localStorage.getItem('ott_blue_lang') || 'javascript';
+    let redLang = localStorage.getItem('ott_red_lang') || 'javascript';
+
+    // Theme & Player Profile & Socket.io Online Multiplayer
+    let currentTheme = localStorage.getItem('ott_theme') || 'light';
+    let currentPlayerProfile = null;
+    let socket = null;
+    let isOnlineMatch = false;
+    let currentOnlineRoom = null;
+    let myOnlineSlot = null; // 'blue' | 'red' | 'spectator'
 
     // Sound FX (Web Audio API)
     let audioCtx = null;
@@ -452,7 +462,7 @@
         return window.BOT_PRESETS.random;
     }
 
-    function executeBot(player) {
+    async function executeBot(player) {
         const legalMoves = getLegalMoves(player, board);
         if (legalMoves.length === 0) return null;
 
@@ -502,24 +512,48 @@
         let rawMove = null;
         let botError = null;
 
-        try {
-            const botWrapper = new Function('state', 'helpers', 'log', `
-                ${codeString}
-                if (typeof getNextMove !== 'function') {
-                    throw new Error("Bot code must define 'function getNextMove(state, helpers, log)'.");
-                }
-                return getNextMove(state, helpers, log);
-            `);
-            rawMove = botWrapper(state, helpers, logger);
-        } catch (err) {
-            botError = err;
-        }
-        const elapsedMs = (performance.now() - startTime).toFixed(1);
-
-        // Append logs to terminal
         const botName = player === 1 ? 'Đội Xanh' : 'Đội Đỏ';
         const botTag = player === 1 ? 'blue' : 'red';
         const ctrlType = player === 1 ? controllers.blue : controllers.red;
+        const currentLang = player === 1 ? blueLang : redLang;
+
+        if (ctrlType === 'custom' && (currentLang === 'python' || currentLang === 'cpp')) {
+            try {
+                const res = await fetch('/api/run-bot-move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        botId: player === 1 ? 'blue' : 'red',
+                        lang: currentLang,
+                        code: codeString,
+                        state: state
+                    })
+                });
+                const data = await res.json();
+                if (data.success && data.move) {
+                    rawMove = data.move;
+                    if (data.log) currentLogs.push(data.log);
+                } else {
+                    botError = new Error(data.error || 'Runner error');
+                }
+            } catch (err) {
+                botError = err;
+            }
+        } else {
+            try {
+                const botWrapper = new Function('state', 'helpers', 'log', `
+                    ${codeString}
+                    if (typeof getNextMove !== 'function') {
+                        throw new Error("Bot code must define 'function getNextMove(state, helpers, log)'.");
+                    }
+                    return getNextMove(state, helpers, log);
+                `);
+                rawMove = botWrapper(state, helpers, logger);
+            } catch (err) {
+                botError = err;
+            }
+        }
+        const elapsedMs = (performance.now() - startTime).toFixed(1);
 
         if (currentLogs.length > 0) {
             currentLogs.forEach(msg => {
@@ -666,7 +700,7 @@
 
     // ===== Battle Loop Controls =====
 
-    function stepBattle() {
+    async function stepBattle() {
         if (gameOver) {
             pauseBattle();
             return;
@@ -681,7 +715,7 @@
 
         // Bot turn
         updateStatusTicker(`${currentPlayer === 1 ? 'Đội Xanh' : 'Đội Đỏ'} đang tính toán nước đi...`);
-        const move = executeBot(currentPlayer);
+        const move = await executeBot(currentPlayer);
         if (move) {
             executeMove(move.from.r, move.from.c, move.to.r, move.to.c);
         }
@@ -746,7 +780,29 @@
         playSound('win');
         drawBoard();
         updateStatusTicker(reason);
-        showWinModal(wonPlayer, reason);
+
+        // Record Elo for offline / local matches
+        let eloOutcome = null;
+        if (!isOnlineMatch && window.EloSystem && currentPlayerProfile) {
+            const blueName = (controllers.blue === 'custom' || controllers.blue === 'human')
+                ? currentPlayerProfile.name
+                : `AI ${getControllerTitle(controllers.blue)}`;
+            const redName = (controllers.red === 'custom' || controllers.red === 'human')
+                ? (controllers.blue === 'custom' || controllers.blue === 'human' ? 'Đối thủ' : currentPlayerProfile.name)
+                : `AI ${getControllerTitle(controllers.red)}`;
+
+            eloOutcome = window.EloSystem.recordMatch({
+                blueName,
+                redName,
+                blueLang,
+                redLang,
+                winner: wonPlayer
+            });
+            updateProfileUI();
+            renderLeaderboard();
+        }
+
+        showWinModal(wonPlayer, reason, eloOutcome);
     }
 
     // ===== Human Cell Click Handler =====
@@ -1045,11 +1101,12 @@
 
     // ===== Win Modal =====
 
-    function showWinModal(wonPlayer, reason) {
+    function showWinModal(wonPlayer, reason, eloOutcome = null) {
         const overlay = document.getElementById('win-overlay');
         const title = document.getElementById('win-title');
         const reasonEl = document.getElementById('win-reason');
         const statsEl = document.getElementById('win-stats');
+        const eloBox = document.getElementById('win-elo-box');
         if (!overlay) return;
 
         if (wonPlayer === 1) {
@@ -1076,6 +1133,32 @@
                     <span>Quân Đỏ đã ăn:</span> <strong>${capturedByRed.length} quân</strong>
                 </div>
             `;
+        }
+
+        if (eloBox) {
+            if (eloOutcome) {
+                const bDelta = eloOutcome.blue.delta >= 0 ? `+${eloOutcome.blue.delta}` : `${eloOutcome.blue.delta}`;
+                const rDelta = eloOutcome.red.delta >= 0 ? `+${eloOutcome.red.delta}` : `${eloOutcome.red.delta}`;
+                const bClass = eloOutcome.blue.delta >= 0 ? 'pos' : 'neg';
+                const rClass = eloOutcome.red.delta >= 0 ? 'pos' : 'neg';
+                eloBox.innerHTML = `
+                    <div class="elo-outcome-card">
+                        <div class="elo-player-result">
+                            <strong style="color:var(--theme-blue);">🔵 ${escapeHtml(eloOutcome.blue.name)}</strong>
+                            <span>${eloOutcome.blue.oldElo} ➔ <strong>${eloOutcome.blue.newElo}</strong></span>
+                            <span class="elo-delta-badge ${bClass}">${bDelta} Elo</span>
+                        </div>
+                        <div style="font-weight:900; font-size:1.1rem; color:var(--theme-border);">VS</div>
+                        <div class="elo-player-result">
+                            <strong style="color:var(--theme-red);">🔴 ${escapeHtml(eloOutcome.red.name)}</strong>
+                            <span>${eloOutcome.red.oldElo} ➔ <strong>${eloOutcome.red.newElo}</strong></span>
+                            <span class="elo-delta-badge ${rClass}">${rDelta} Elo</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                eloBox.innerHTML = '';
+            }
         }
 
         overlay.style.display = 'flex';
@@ -1265,36 +1348,58 @@
         runChunk();
     }
 
-    // ===== Ace Editor Setup =====
+    // ===== Multi-Language Ace Editor & Templates =====
+
+    const MODE_MAP = {
+        javascript: 'ace/mode/javascript',
+        python: 'ace/mode/python',
+        cpp: 'ace/mode/c_cpp'
+    };
+
+    function getDefaultCodeForLang(player, lang) {
+        const key = `ott_bot_code_${player === 1 ? 'blue' : 'red'}_${lang}`;
+        const saved = localStorage.getItem(key);
+        if (saved) return saved;
+        if (window.MULTI_LANG_TEMPLATES && window.MULTI_LANG_TEMPLATES[lang]) {
+            return player === 1 ? window.MULTI_LANG_TEMPLATES[lang].blue : window.MULTI_LANG_TEMPLATES[lang].red;
+        }
+        return window.BOT_PRESETS.random;
+    }
 
     function initAceEditors() {
-        const defaultBlue = localStorage.getItem('ott_bot_code_blue') || window.BOT_PRESETS.starterBlue;
-        const defaultRed = localStorage.getItem('ott_bot_code_red') || window.BOT_PRESETS.starterRed;
+        const defaultBlue = getDefaultCodeForLang(1, blueLang);
+        const defaultRed = getDefaultCodeForLang(2, redLang);
+        const editorTheme = "ace/theme/monokai";
+
+        const blueSel = document.getElementById('blue-lang-select');
+        const redSel = document.getElementById('red-lang-select');
+        if (blueSel) blueSel.value = blueLang;
+        if (redSel) redSel.value = redLang;
 
         if (window.ace) {
             try {
                 editorBlue = window.ace.edit("editor-blue");
-                editorBlue.setTheme("ace/theme/monokai");
-                editorBlue.session.setMode("ace/mode/javascript");
+                editorBlue.setTheme(editorTheme);
+                editorBlue.session.setMode(MODE_MAP[blueLang] || "ace/mode/javascript");
                 editorBlue.setValue(defaultBlue, -1);
                 editorBlue.setFontSize("13px");
                 editorBlue.setShowPrintMargin(false);
-                editorBlue.session.setTabSize(2);
+                editorBlue.session.setTabSize(4);
                 editorBlue.session.setUseSoftTabs(true);
                 editorBlue.on('change', () => {
-                    localStorage.setItem('ott_bot_code_blue', editorBlue.getValue());
+                    localStorage.setItem(`ott_bot_code_blue_${blueLang}`, editorBlue.getValue());
                 });
 
                 editorRed = window.ace.edit("editor-red");
-                editorRed.setTheme("ace/theme/monokai");
-                editorRed.session.setMode("ace/mode/javascript");
+                editorRed.setTheme(editorTheme);
+                editorRed.session.setMode(MODE_MAP[redLang] || "ace/mode/javascript");
                 editorRed.setValue(defaultRed, -1);
                 editorRed.setFontSize("13px");
                 editorRed.setShowPrintMargin(false);
-                editorRed.session.setTabSize(2);
+                editorRed.session.setTabSize(4);
                 editorRed.session.setUseSoftTabs(true);
                 editorRed.on('change', () => {
-                    localStorage.setItem('ott_bot_code_red', editorRed.getValue());
+                    localStorage.setItem(`ott_bot_code_red_${redLang}`, editorRed.getValue());
                 });
             } catch (err) {
                 console.warn("Ace init fallback:", err);
@@ -1305,22 +1410,58 @@
         }
     }
 
+    function setEditorLanguage(player, lang) {
+        if (player === 1) {
+            blueLang = lang;
+            localStorage.setItem('ott_blue_lang', lang);
+            const sel = document.getElementById('blue-lang-select');
+            if (sel) sel.value = lang;
+            if (editorBlue) {
+                editorBlue.session.setMode(MODE_MAP[lang] || 'ace/mode/javascript');
+                const code = getDefaultCodeForLang(1, lang);
+                editorBlue.setValue(code, -1);
+            }
+            const hint = document.getElementById('blue-editor-hint');
+            if (hint) {
+                if (lang === 'python') hint.innerHTML = 'Lập trình bot Python cho Đội Xanh (nhận state JSON qua <code>stdin</code>, in nước đi ra <code>stdout</code>)';
+                else if (lang === 'cpp') hint.innerHTML = 'Lập trình bot C++17 cho Đội Xanh (nhận state JSON qua <code>cin</code>, in nước đi ra <code>cout</code>)';
+                else hint.innerHTML = 'Lập trình hàm <code>getNextMove(state, helpers, log)</code> cho Đội Xanh';
+            }
+        } else {
+            redLang = lang;
+            localStorage.setItem('ott_red_lang', lang);
+            const sel = document.getElementById('red-lang-select');
+            if (sel) sel.value = lang;
+            if (editorRed) {
+                editorRed.session.setMode(MODE_MAP[lang] || 'ace/mode/javascript');
+                const code = getDefaultCodeForLang(2, lang);
+                editorRed.setValue(code, -1);
+            }
+            const hint = document.getElementById('red-editor-hint');
+            if (hint) {
+                if (lang === 'python') hint.innerHTML = 'Lập trình bot Python cho Đội Đỏ (nhận state JSON qua <code>stdin</code>, in nước đi ra <code>stdout</code>)';
+                else if (lang === 'cpp') hint.innerHTML = 'Lập trình bot C++17 cho Đội Đỏ (nhận state JSON qua <code>cin</code>, in nước đi ra <code>cout</code>)';
+                else hint.innerHTML = 'Lập trình hàm <code>getNextMove(state, helpers, log)</code> cho Đội Đỏ';
+            }
+        }
+    }
+
     function initTextareaFallback() {
         const elBlue = document.getElementById('editor-blue');
         const elRed = document.getElementById('editor-red');
-        const defaultBlue = localStorage.getItem('ott_bot_code_blue') || window.BOT_PRESETS.starterBlue;
-        const defaultRed = localStorage.getItem('ott_bot_code_red') || window.BOT_PRESETS.starterRed;
+        const defaultBlue = getDefaultCodeForLang(1, blueLang);
+        const defaultRed = getDefaultCodeForLang(2, redLang);
 
         if (elBlue) {
             elBlue.innerHTML = `<textarea class="fallback-textarea" id="textarea-blue">${escapeHtml(defaultBlue)}</textarea>`;
             document.getElementById('textarea-blue').addEventListener('input', (e) => {
-                localStorage.setItem('ott_bot_code_blue', e.target.value);
+                localStorage.setItem(`ott_bot_code_blue_${blueLang}`, e.target.value);
             });
         }
         if (elRed) {
             elRed.innerHTML = `<textarea class="fallback-textarea" id="textarea-red">${escapeHtml(defaultRed)}</textarea>`;
             document.getElementById('textarea-red').addEventListener('input', (e) => {
-                localStorage.setItem('ott_bot_code_red', e.target.value);
+                localStorage.setItem(`ott_bot_code_red_${redLang}`, e.target.value);
             });
         }
     }
@@ -1332,14 +1473,306 @@
                 const ta = document.getElementById('textarea-blue');
                 if (ta) ta.value = code;
             }
-            localStorage.setItem('ott_bot_code_blue', code);
+            localStorage.setItem(`ott_bot_code_blue_${blueLang}`, code);
         } else {
             if (editorRed) editorRed.setValue(code, -1);
             else {
                 const ta = document.getElementById('textarea-red');
                 if (ta) ta.value = code;
             }
-            localStorage.setItem('ott_bot_code_red', code);
+            localStorage.setItem(`ott_bot_code_red_${redLang}`, code);
+        }
+    }
+
+    // ===== Theme Management (Dark Mode) =====
+
+    function initTheme() {
+        const saved = localStorage.getItem('ott_theme') || 
+            (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        setTheme(saved);
+    }
+
+    function setTheme(theme) {
+        currentTheme = theme;
+        localStorage.setItem('ott_theme', theme);
+        const root = document.documentElement;
+        const btn = document.getElementById('theme-toggle-btn');
+        if (theme === 'dark') {
+            root.setAttribute('data-theme', 'dark');
+            if (btn) btn.innerHTML = '☀️ Ban ngày';
+        } else {
+            root.removeAttribute('data-theme');
+            if (btn) btn.innerHTML = '🌙 Ban đêm';
+        }
+        if (editorBlue) editorBlue.setTheme('ace/theme/monokai');
+        if (editorRed) editorRed.setTheme('ace/theme/monokai');
+    }
+
+    function toggleTheme() {
+        setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    }
+
+    // ===== Player Profile & Leaderboard =====
+
+    function initPlayerProfile() {
+        if (!window.EloSystem) return;
+        let p = window.EloSystem.getCurrentPlayer();
+        if (!p) {
+            p = window.EloSystem.setCurrentPlayer('Người chơi ' + Math.floor(100 + Math.random() * 900), 'javascript');
+        }
+        currentPlayerProfile = p;
+        updateProfileUI();
+        renderLeaderboard();
+    }
+
+    function updateProfileUI() {
+        if (!currentPlayerProfile) return;
+        const nameEl = document.getElementById('header-player-name');
+        const eloEl = document.getElementById('header-player-elo');
+        const lbName = document.getElementById('lb-user-name');
+        const lbElo = document.getElementById('lb-user-elo');
+        if (nameEl) nameEl.textContent = currentPlayerProfile.name;
+        if (eloEl) eloEl.textContent = currentPlayerProfile.elo;
+        if (lbName) lbName.textContent = currentPlayerProfile.name;
+        if (lbElo) lbElo.textContent = currentPlayerProfile.elo;
+    }
+
+    function showProfileModal() {
+        const modal = document.getElementById('player-profile-modal');
+        const nameInp = document.getElementById('input-player-name');
+        const langSel = document.getElementById('select-preferred-lang');
+        const statsBox = document.getElementById('profile-stats-box');
+        if (!modal) return;
+
+        if (currentPlayerProfile) {
+            if (nameInp) nameInp.value = currentPlayerProfile.name;
+            if (langSel) langSel.value = currentPlayerProfile.lang || 'javascript';
+            if (statsBox) {
+                const wr = currentPlayerProfile.matches > 0 
+                    ? Math.round((currentPlayerProfile.wins / currentPlayerProfile.matches) * 100) 
+                    : 0;
+                statsBox.innerHTML = `
+                    <div class="win-stat-row"><span>Điểm Elo hiện tại:</span> <strong style="color:var(--theme-gold); font-size:1.1rem;">${currentPlayerProfile.elo}</strong></div>
+                    <div class="win-stat-row"><span>Số trận đã đấu:</span> <strong>${currentPlayerProfile.matches} trận</strong></div>
+                    <div class="win-stat-row"><span>Thắng / Thua / Hòa:</span> <strong>${currentPlayerProfile.wins}W - ${currentPlayerProfile.losses}L - ${currentPlayerProfile.draws}D</strong></div>
+                    <div class="win-stat-row"><span>Tỉ lệ thắng:</span> <strong>${wr}%</strong></div>
+                `;
+            }
+        }
+        modal.style.display = 'flex';
+    }
+
+    function hideProfileModal() {
+        const modal = document.getElementById('player-profile-modal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    function savePlayerProfile() {
+        const nameInp = document.getElementById('input-player-name');
+        const langSel = document.getElementById('select-preferred-lang');
+        const name = nameInp ? nameInp.value.trim() : '';
+        const lang = langSel ? langSel.value : 'javascript';
+        if (name && window.EloSystem) {
+            currentPlayerProfile = window.EloSystem.setCurrentPlayer(name, lang);
+            updateProfileUI();
+            renderLeaderboard();
+            hideProfileModal();
+        }
+    }
+
+    function renderLeaderboard(data) {
+        const tbody = document.getElementById('leaderboard-body');
+        if (!tbody || !window.EloSystem) return;
+        const list = data || window.EloSystem.getLeaderboard();
+        list.sort((a, b) => b.elo - a.elo);
+
+        tbody.innerHTML = list.map((item, idx) => {
+            const rank = idx + 1;
+            let medal = `<span class="rank-badge rank-normal">#${rank}</span>`;
+            if (rank === 1) medal = `<span class="rank-badge rank-gold" title="Hạng 1">🥇</span>`;
+            else if (rank === 2) medal = `<span class="rank-badge rank-silver" title="Hạng 2">🥈</span>`;
+            else if (rank === 3) medal = `<span class="rank-badge rank-bronze" title="Hạng 3">🥉</span>`;
+
+            const isCur = currentPlayerProfile && item.name.toLowerCase() === currentPlayerProfile.name.toLowerCase();
+            const curClass = isCur ? 'current-user-row' : '';
+            const winRate = item.matches > 0 ? Math.round((item.wins / item.matches) * 100) : 0;
+            const lang = (item.lang || 'js').toLowerCase();
+            const langClass = lang === 'cpp' ? 'cpp' : (lang === 'py' || lang === 'python' ? 'py' : 'js');
+
+            return `
+                <tr class="${curClass}">
+                    <td>${medal}</td>
+                    <td><strong>${escapeHtml(item.name)}</strong> ${item.isBot ? '🤖' : '👤'}</td>
+                    <td><strong class="elo-number">${item.elo}</strong></td>
+                    <td><span class="lang-pill ${langClass}">${langClass.toUpperCase()}</span></td>
+                    <td>${item.matches}</td>
+                    <td>${item.wins}W - ${item.losses}L - ${item.draws}D</td>
+                    <td>${winRate}%</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    // ===== Realtime Online Multiplayer (Socket.io) =====
+
+    function initOnlineSocket() {
+        if (typeof io !== 'function') return;
+        try {
+            socket = io();
+            socket.on('connect', () => {
+                const btn = document.getElementById('open-online-modal-btn');
+                if (btn) btn.classList.add('connected');
+            });
+            socket.on('leaderboard_data', (data) => {
+                renderLeaderboard(data);
+            });
+            socket.on('room_created', (data) => {
+                currentOnlineRoom = data.roomCode;
+                myOnlineSlot = data.slot;
+                showLobbyView(data.roomCode, data.roomState);
+            });
+            socket.on('room_joined', (data) => {
+                currentOnlineRoom = data.roomCode;
+                myOnlineSlot = data.slot;
+                showLobbyView(data.roomCode, data.roomState);
+            });
+            socket.on('room_updated', (roomState) => {
+                updateLobbyState(roomState);
+            });
+            socket.on('match_preparing', (msg) => {
+                const st = document.getElementById('online-sync-status');
+                if (st) st.textContent = msg;
+                updateStatusTicker(msg);
+            });
+            socket.on('match_started', (data) => {
+                hideOnlineModal();
+                isOnlineMatch = true;
+                board = data.board;
+                currentPlayer = 1;
+                turnCount = 1;
+                moveHistory = [];
+                capturedByBlue = [];
+                capturedByRed = [];
+                gameOver = false;
+                winner = null;
+                drawBoard();
+                updateTurnIndicator();
+                updateMaterialPanels();
+                clearMoveLedger();
+                updateStatusTicker(`⚔️ Trận đấu Online bắt đầu! ${data.blue.name} (Xanh) vs ${data.red.name} (Đỏ)`);
+            });
+            socket.on('online_move_made', (data) => {
+                const m = data.moveRecord;
+                board = data.board;
+                currentPlayer = data.currentPlayer;
+                turnCount = data.turnCount;
+                capturedByBlue = data.capturedByBlue;
+                capturedByRed = data.capturedByRed;
+                lastMove = { fromR: m.from.r, fromC: m.from.c, toR: m.to.r, toC: m.to.c };
+                drawBoard();
+                updateTurnIndicator();
+                updateMaterialPanels();
+                appendMoveLedger(m);
+                if (m.capture) playSound('capture');
+                else playSound('move');
+                if (m.log) {
+                    addConsoleLog({
+                        type: m.player === 1 ? 'blue' : 'red',
+                        player: m.player,
+                        text: `[Online] ${m.log.slice(0, 150)}`,
+                        time: new Date().toLocaleTimeString(),
+                        elapsed: m.elapsed
+                    });
+                }
+            });
+            socket.on('online_match_finished', (data) => {
+                isOnlineMatch = false;
+                gameOver = true;
+                winner = data.winner;
+                winReason = data.reason;
+                playSound('win');
+                drawBoard();
+                updateStatusTicker(data.reason);
+                showWinModal(data.winner, data.reason, data.eloOutcome);
+            });
+            socket.on('match_error', (err) => {
+                alert(err);
+                updateStatusTicker(err);
+                const st = document.getElementById('online-sync-status');
+                if (st) st.textContent = err;
+            });
+            socket.on('join_error', (err) => {
+                alert(err);
+            });
+        } catch (e) {
+            console.warn("Socket.io not reachable (offline mode active):", e);
+        }
+    }
+
+    function showOnlineModal() {
+        const modal = document.getElementById('online-match-modal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function hideOnlineModal() {
+        const modal = document.getElementById('online-match-modal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    function showLobbyView(roomCode, roomState) {
+        const createView = document.getElementById('online-view-create');
+        const joinView = document.getElementById('online-view-join');
+        const lobbyView = document.getElementById('online-room-lobby');
+        const nav = document.getElementById('online-tab-nav');
+        const pinLabel = document.getElementById('room-pin-label');
+
+        if (createView) createView.style.display = 'none';
+        if (joinView) joinView.style.display = 'none';
+        if (nav) nav.style.display = 'none';
+        if (lobbyView) lobbyView.style.display = 'flex';
+        if (pinLabel) pinLabel.textContent = roomCode;
+
+        updateLobbyState(roomState);
+    }
+
+    function updateLobbyState(roomState) {
+        if (!roomState) return;
+        const bName = document.getElementById('lobby-blue-name');
+        const bLang = document.getElementById('lobby-blue-lang');
+        const bStatus = document.getElementById('lobby-blue-status');
+
+        const rName = document.getElementById('lobby-red-name');
+        const rLang = document.getElementById('lobby-red-lang');
+        const rStatus = document.getElementById('lobby-red-status');
+
+        if (roomState.blue) {
+            if (bName) bName.textContent = roomState.blue.name;
+            if (bLang) {
+                bLang.textContent = (roomState.blue.lang || 'js').toUpperCase();
+                bLang.className = `lang-pill ${roomState.blue.lang}`;
+            }
+            if (bStatus) {
+                bStatus.textContent = roomState.blue.ready ? '✓ Đã sẵn sàng' : 'Chờ sẵn sàng';
+                bStatus.className = `slot-ready-tag ${roomState.blue.ready ? 'ready' : 'waiting'}`;
+            }
+        } else {
+            if (bName) bName.textContent = 'Đang chờ người chơi...';
+            if (bStatus) { bStatus.textContent = 'Trống'; bStatus.className = 'slot-ready-tag waiting'; }
+        }
+
+        if (roomState.red) {
+            if (rName) rName.textContent = roomState.red.name;
+            if (rLang) {
+                rLang.textContent = (roomState.red.lang || 'js').toUpperCase();
+                rLang.className = `lang-pill ${roomState.red.lang}`;
+            }
+            if (rStatus) {
+                rStatus.textContent = roomState.red.ready ? '✓ Đã sẵn sàng' : 'Chờ sẵn sàng';
+                rStatus.className = `slot-ready-tag ${roomState.red.ready ? 'ready' : 'waiting'}`;
+            }
+        } else {
+            if (rName) rName.textContent = 'Đang chờ người chơi...';
+            if (rStatus) { rStatus.textContent = 'Trống'; rStatus.className = 'slot-ready-tag waiting'; }
         }
     }
 
@@ -1511,19 +1944,129 @@
             });
         }
 
+        // Theme Toggle Button
+        const themeBtn = document.getElementById('theme-toggle-btn');
+        if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+
+        // Profile Modal Listeners
+        const profileBtn = document.getElementById('profile-open-btn');
+        if (profileBtn) profileBtn.addEventListener('click', showProfileModal);
+        const closeProfileBtn = document.getElementById('close-profile-modal-btn');
+        if (closeProfileBtn) closeProfileBtn.addEventListener('click', hideProfileModal);
+        const saveProfileBtn = document.getElementById('save-profile-btn');
+        if (saveProfileBtn) saveProfileBtn.addEventListener('click', savePlayerProfile);
+
+        // Language Selectors
+        const blueLangSel = document.getElementById('blue-lang-select');
+        if (blueLangSel) {
+            blueLangSel.addEventListener('change', (e) => setEditorLanguage(1, e.target.value));
+        }
+        const redLangSel = document.getElementById('red-lang-select');
+        if (redLangSel) {
+            redLangSel.addEventListener('change', (e) => setEditorLanguage(2, e.target.value));
+        }
+
+        // Online Multiplayer Modal & Actions
+        const openOnlineBtn = document.getElementById('open-online-modal-btn');
+        if (openOnlineBtn) openOnlineBtn.addEventListener('click', showOnlineModal);
+        const closeOnlineBtn = document.getElementById('close-online-modal-btn');
+        if (closeOnlineBtn) closeOnlineBtn.addEventListener('click', hideOnlineModal);
+
+        document.querySelectorAll('#online-tab-nav .online-tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('#online-tab-nav .online-tab-btn').forEach(b => b.classList.remove('active'));
+                e.currentTarget.classList.add('active');
+                const tabId = e.currentTarget.dataset.tab;
+                const createView = document.getElementById('online-view-create');
+                const joinView = document.getElementById('online-view-join');
+                if (createView) createView.style.display = tabId === 'online-view-create' ? 'block' : 'none';
+                if (joinView) joinView.style.display = tabId === 'online-view-join' ? 'block' : 'none';
+            });
+        });
+
+        const createRoomBtn = document.getElementById('online-create-room-btn');
+        if (createRoomBtn) {
+            createRoomBtn.addEventListener('click', () => {
+                if (!socket || !socket.connected) {
+                    alert("Chưa kết nối được với Server! Hãy chạy 'npm start' trong terminal.");
+                    return;
+                }
+                socket.emit('create_room', {
+                    playerName: currentPlayerProfile ? currentPlayerProfile.name : 'Người chơi',
+                    lang: blueLang
+                });
+            });
+        }
+
+        const joinRoomBtn = document.getElementById('online-join-room-btn');
+        if (joinRoomBtn) {
+            joinRoomBtn.addEventListener('click', () => {
+                if (!socket || !socket.connected) {
+                    alert("Chưa kết nối được với Server! Hãy chạy 'npm start' trong terminal.");
+                    return;
+                }
+                const inp = document.getElementById('online-join-code-input');
+                const code = inp ? inp.value.trim() : '';
+                if (!code) {
+                    alert("Vui lòng nhập mã phòng!");
+                    return;
+                }
+                socket.emit('join_room', {
+                    roomCode: code,
+                    playerName: currentPlayerProfile ? currentPlayerProfile.name : 'Người chơi',
+                    lang: redLang
+                });
+            });
+        }
+
+        const onlineReadyBtn = document.getElementById('online-ready-btn');
+        if (onlineReadyBtn) {
+            onlineReadyBtn.addEventListener('click', () => {
+                if (!socket || !currentOnlineRoom) return;
+                const code = myOnlineSlot === 'blue' 
+                    ? (editorBlue ? editorBlue.getValue() : '')
+                    : (editorRed ? editorRed.getValue() : '');
+                const lang = myOnlineSlot === 'blue' ? blueLang : redLang;
+                socket.emit('player_ready', {
+                    code,
+                    lang,
+                    name: currentPlayerProfile ? currentPlayerProfile.name : 'Người chơi'
+                });
+                onlineReadyBtn.textContent = '⏳ Đang chờ đối thủ...';
+            });
+        }
+
+        const leaveRoomBtn = document.getElementById('online-leave-room-btn');
+        if (leaveRoomBtn) {
+            leaveRoomBtn.addEventListener('click', () => {
+                if (socket) socket.emit('leave_room');
+                currentOnlineRoom = null;
+                myOnlineSlot = null;
+                const lobby = document.getElementById('online-room-lobby');
+                const nav = document.getElementById('online-tab-nav');
+                const createView = document.getElementById('online-view-create');
+                if (lobby) lobby.style.display = 'none';
+                if (nav) nav.style.display = 'flex';
+                if (createView) createView.style.display = 'block';
+                hideOnlineModal();
+            });
+        }
+
         // Export & Import Bot Code
         const exportBlue = document.getElementById('export-blue-btn');
         if (exportBlue) {
             exportBlue.addEventListener('click', () => {
                 const code = editorBlue ? editorBlue.getValue() : '';
-                downloadFile("BlueBot.js", code);
+                const ext = blueLang === 'cpp' ? 'cpp' : (blueLang === 'python' ? 'py' : 'js');
+                downloadFile(`BlueBot.${ext}`, code);
             });
         }
         const exportRed = document.getElementById('export-red-btn');
         if (exportRed) {
             exportRed.addEventListener('click', () => {
                 const code = editorRed ? editorRed.getValue() : '';
-                downloadFile("RedBot.js", code);
+                const ext = redLang === 'cpp' ? 'cpp' : (redLang === 'python' ? 'py' : 'js');
+                downloadFile(`RedBot.${ext}`, code);
             });
         }
 
@@ -1532,6 +2075,11 @@
             importBlue.addEventListener('change', (e) => {
                 const file = e.target.files[0];
                 if (file) {
+                    const name = file.name.toLowerCase();
+                    if (name.endsWith('.cpp')) setEditorLanguage(1, 'cpp');
+                    else if (name.endsWith('.py')) setEditorLanguage(1, 'python');
+                    else if (name.endsWith('.js')) setEditorLanguage(1, 'javascript');
+
                     const reader = new FileReader();
                     reader.onload = (evt) => setEditorCode(1, evt.target.result);
                     reader.readAsText(file);
@@ -1543,6 +2091,11 @@
             importRed.addEventListener('change', (e) => {
                 const file = e.target.files[0];
                 if (file) {
+                    const name = file.name.toLowerCase();
+                    if (name.endsWith('.cpp')) setEditorLanguage(2, 'cpp');
+                    else if (name.endsWith('.py')) setEditorLanguage(2, 'python');
+                    else if (name.endsWith('.js')) setEditorLanguage(2, 'javascript');
+
                     const reader = new FileReader();
                     reader.onload = (evt) => setEditorCode(2, evt.target.result);
                     reader.readAsText(file);
@@ -1720,16 +2273,19 @@
     function init() {
         renderBoardLabels();
         renderRulesRibbon();
+        initTheme();
         initBoard();
         initAceEditors();
+        initPlayerProfile();
         drawBoard();
         updateTurnIndicator();
         updateMaterialPanels();
         updateBattleButtons();
         updateRoleUI();
         setupEventListeners();
+        initOnlineSocket();
         renderConsole();
-        updateStatusTicker("Sẵn sàng! Lập trình bot trong BlueBot.js và bấm 'Bắt đầu đấu'.");
+        updateStatusTicker("Sẵn sàng! Lập trình bot và bấm 'Bắt đầu đấu'.");
     }
 
     // Auto-init on DOM loaded
