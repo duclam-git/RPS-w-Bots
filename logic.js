@@ -781,28 +781,8 @@
         drawBoard();
         updateStatusTicker(reason);
 
-        // Record Elo for offline / local matches
-        let eloOutcome = null;
-        if (!isOnlineMatch && window.EloSystem && currentPlayerProfile) {
-            const blueName = (controllers.blue === 'custom' || controllers.blue === 'human')
-                ? currentPlayerProfile.name
-                : `AI ${getControllerTitle(controllers.blue)}`;
-            const redName = (controllers.red === 'custom' || controllers.red === 'human')
-                ? (controllers.blue === 'custom' || controllers.blue === 'human' ? 'Đối thủ' : currentPlayerProfile.name)
-                : `AI ${getControllerTitle(controllers.red)}`;
-
-            eloOutcome = window.EloSystem.recordMatch({
-                blueName,
-                redName,
-                blueLang,
-                redLang,
-                winner: wonPlayer
-            });
-            updateProfileUI();
-            renderLeaderboard();
-        }
-
-        showWinModal(wonPlayer, reason, eloOutcome);
+        // Offline / local matches do not count toward Elo rating (unrated practice matches)
+        showWinModal(wonPlayer, reason, null);
     }
 
     // ===== Human Cell Click Handler =====
@@ -1157,7 +1137,11 @@
                     </div>
                 `;
             } else {
-                eloBox.innerHTML = '';
+                eloBox.innerHTML = `
+                    <div class="elo-outcome-card" style="justify-content:center; color:var(--theme-muted); font-size:0.85rem; font-weight:600;">
+                        <span>⚔️ Trận đấu Offline (Đấu tập - Không tính điểm Elo)</span>
+                    </div>
+                `;
             }
         }
 
@@ -1583,6 +1567,17 @@
     function renderLeaderboard(data) {
         const tbody = document.getElementById('leaderboard-body');
         if (!tbody || !window.EloSystem) return;
+        if (data && Array.isArray(data)) {
+            window.EloSystem.saveLeaderboard(data);
+            if (currentPlayerProfile) {
+                const found = data.find(p => p.name.toLowerCase() === currentPlayerProfile.name.toLowerCase());
+                if (found) {
+                    currentPlayerProfile = { ...currentPlayerProfile, ...found };
+                    localStorage.setItem('ott_current_player', JSON.stringify(currentPlayerProfile));
+                    updateProfileUI();
+                }
+            }
+        }
         const list = data || window.EloSystem.getLeaderboard();
         list.sort((a, b) => b.elo - a.elo);
 
@@ -1693,6 +1688,9 @@
                 playSound('win');
                 drawBoard();
                 updateStatusTicker(data.reason);
+                if (data.eloOutcome && data.eloOutcome.updatedLeaderboard) {
+                    renderLeaderboard(data.eloOutcome.updatedLeaderboard);
+                }
                 showWinModal(data.winner, data.reason, data.eloOutcome);
             });
             socket.on('match_error', (err) => {

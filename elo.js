@@ -25,7 +25,13 @@
                 return [...DEFAULT_LEADERBOARD];
             }
             const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) && parsed.length > 0 ? parsed : [...DEFAULT_LEADERBOARD];
+            if (!Array.isArray(parsed) || parsed.length === 0) return [...DEFAULT_LEADERBOARD];
+            const cleaned = parsed.filter(item => {
+                if (!item || !item.name) return false;
+                const n = item.name.trim();
+                return n !== 'Đối thủ' && !n.startsWith('AI Code Bot') && !n.startsWith('AI Người chơi');
+            });
+            return cleaned.length > 0 ? cleaned : [...DEFAULT_LEADERBOARD];
         } catch (e) {
             return [...DEFAULT_LEADERBOARD];
         }

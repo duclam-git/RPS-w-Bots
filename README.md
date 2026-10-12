@@ -104,6 +104,7 @@ log("Đang săn quân Kéo của đối thủ:", bestMove.notation);
 - 🏆 **Bảng Xếp Hạng & Hệ Thống Điểm Elo (FIDE Rating):**
   - Bắt buộc nhập tên người chơi trước khi đấu.
   - Công thức tính điểm Elo chuẩn cờ vua (khởi đầu 1200 điểm, K-factor = 32).
+  - Điểm Elo và số trận thi đấu chỉ tính cho các trận đấu Online Multiplayer (các trận đấu Offline / Đấu tập là Unrated, không tính điểm Elo).
   - Bảng xếp hạng vinh danh Top người chơi kèm huy chương 🥇🥈🥉, thống kê số trận, tỷ lệ thắng.
 - 💾 **Tự động lưu & Xuất/Nạp file:** Tự động lưu theo từng ngôn ngữ, hỗ trợ xuất và nạp file `.js`, `.py`, `.cpp`.
 - ⏯️ **Điều khiển trận đấu linh hoạt:** Chạy tự động, Tạm dừng, Đi từng bước, Điều chỉnh tốc độ từ 800ms đến 5ms.
