@@ -40,20 +40,20 @@
     "isBot": true
   },
   {
-    "name": "Người chơi 790",
-    "elo": 1216,
-    "matches": 1,
+    "name": "Người chơi 656",
+    "elo": 1201,
+    "matches": 2,
     "wins": 1,
-    "losses": 0,
+    "losses": 1,
     "draws": 0,
     "lang": "javascript",
     "isBot": false
   },
   {
-    "name": "Người chơi 656",
-    "elo": 1184,
-    "matches": 1,
-    "wins": 0,
+    "name": "Người chơi 790",
+    "elo": 1199,
+    "matches": 2,
+    "wins": 1,
     "losses": 1,
     "draws": 0,
     "lang": "javascript",

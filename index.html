@@ -1,28 +1,33 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>OTTv2 Code Arena — Rock-Paper-Scissors Bot Coding Battle</title>
-    <meta name="description" content="Lập trình Bot quyết chiến Oẳn Tù Tì Cờ Vua 9x9 (OTTv2). Viết thuật toán JavaScript cho AI của bạn đối đầu với bot khác!">
-    
+    <meta name="description"
+        content="Lập trình Bot quyết chiến Oẳn Tù Tì Cờ Vua 9x9 (OTTv2). Viết thuật toán JavaScript cho AI của bạn đối đầu với bot khác!">
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;600;700;800;900&family=Space+Grotesk:wght@600;700;800&display=swap" rel="stylesheet">
-    
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;600;700;800;900&family=Space+Grotesk:wght@600;700;800&display=swap"
+        rel="stylesheet">
+
     <!-- Ace Code Editor -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/theme-monokai.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/mode-javascript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/mode-python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/mode-c_cpp.min.js"></script>
-    
+
     <!-- Socket.io for Realtime Online Multiplayer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
-    
+
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
     <div class="arena-app" id="arena-app">
         <!-- Top Navigation / Arena Header -->
@@ -41,7 +46,8 @@
                     <!-- Blue Controller -->
                     <div class="controller-box blue-box">
                         <span class="controller-badge blue-badge">🔵 XANH</span>
-                        <select id="blue-controller-select" class="controller-dropdown" title="Chọn người điều khiển Đội Xanh">
+                        <select id="blue-controller-select" class="controller-dropdown"
+                            title="Chọn người điều khiển Đội Xanh">
                             <option value="custom" selected>🤖 Code Bot (BlueBot.js)</option>
                             <option value="human">👤 Người chơi (Thủ công)</option>
                             <option value="random">🎲 Random AI</option>
@@ -56,7 +62,8 @@
                     <!-- Red Controller -->
                     <div class="controller-box red-box">
                         <span class="controller-badge red-badge">🔴 ĐỎ</span>
-                        <select id="red-controller-select" class="controller-dropdown" title="Chọn người điều khiển Đội Đỏ">
+                        <select id="red-controller-select" class="controller-dropdown"
+                            title="Chọn người điều khiển Đội Đỏ">
                             <option value="tactical" selected>🧠 Tactical AI (Minimax)</option>
                             <option value="custom">🤖 Code Bot (RedBot.js)</option>
                             <option value="human">👤 Người chơi (Thủ công)</option>
@@ -70,7 +77,8 @@
                 <!-- Profile & Theme Toggles -->
                 <div class="header-meta-group">
                     <button id="profile-open-btn" class="profile-btn" title="Hồ sơ & Điểm Elo của bạn">
-                        👤 <span id="header-player-name">Người chơi</span> (<strong id="header-player-elo">1200</strong>)
+                        👤 <span id="header-player-name">Người chơi</span> (<strong
+                            id="header-player-elo">1200</strong>)
                     </button>
                     <button id="theme-toggle-btn" class="theme-toggle-btn" title="Chuyển chế độ ban đêm/ban ngày">
                         🌙 Ban đêm
@@ -81,17 +89,17 @@
             <!-- Controls Toolbar -->
             <div class="header-actions">
                 <div class="quick-modes">
-                    <button class="preset-mode-btn active" data-mode="bot-vs-bot" title="Đấu Bot với Tactical AI">🤖 Bot vs AI</button>
-                    <button class="preset-mode-btn" data-mode="human-vs-bot" title="Tự mình chơi đấu với Bot">👤 Đấu với Bot</button>
-                    <button class="preset-mode-btn" data-mode="bot-vs-bot-mirror" title="Hai bot tự code đấu nhau">🤖 Bot vs Bot</button>
-                    <button class="preset-mode-btn btn-online-mode" id="open-online-modal-btn" title="Thi đấu Online giữa 2 máy khác nhau">🌐 Đấu Online</button>
+                    <button class="preset-mode-btn btn-online-mode" id="open-online-modal-btn"
+                        title="Thi đấu Online giữa 2 máy khác nhau">🌐 Đấu Online</button>
                 </div>
 
                 <div class="battle-controls">
                     <button id="battle-start-btn" class="action-btn btn-primary">▶ Bắt đầu đấu</button>
-                    <button id="battle-step-btn" class="action-btn btn-secondary" title="Đi 1 nước đơn lẻ để xem xét">⏭ Đi 1 nước</button>
-                    <button id="battle-reset-btn" class="action-btn btn-secondary" title="Thiết lập lại trận đấu">🔄 Chơi lại</button>
-                    
+                    <button id="battle-step-btn" class="action-btn btn-secondary" title="Đi 1 nước đơn lẻ để xem xét">⏭
+                        Đi 1 nước</button>
+                    <button id="battle-reset-btn" class="action-btn btn-secondary" title="Thiết lập lại trận đấu">🔄
+                        Chơi lại</button>
+
                     <div class="speed-select-wrap">
                         <label for="battle-speed-select">⚡ Tốc độ:</label>
                         <select id="battle-speed-select" class="speed-dropdown">
@@ -103,7 +111,8 @@
                         </select>
                     </div>
 
-                    <button id="open-benchmark-btn" class="action-btn btn-gold" title="Chạy mô phỏng hàng loạt 50 trận để đo tỉ lệ thắng">📊 Benchmark 50x</button>
+                    <button id="open-benchmark-btn" class="action-btn btn-gold"
+                        title="Chạy mô phỏng hàng loạt 50 trận để đo tỉ lệ thắng">📊 Benchmark 50x</button>
                     <button id="sound-toggle-btn" class="action-btn btn-utility">🔊 Âm thanh</button>
                 </div>
             </div>
@@ -113,7 +122,8 @@
         <div id="online-active-bar" class="online-active-bar" style="display: none;">
             <div class="oab-left">
                 <span class="oab-badge">🌐 ĐẤU ONLINE</span>
-                <span class="oab-room">Phòng: <strong id="oab-room-code">OTT-XXXX</strong> <button id="oab-copy-btn" class="oab-btn-icon" title="Sao chép mã phòng">📋</button></span>
+                <span class="oab-room">Phòng: <strong id="oab-room-code">OTT-XXXX</strong> <button id="oab-copy-btn"
+                        class="oab-btn-icon" title="Sao chép mã phòng">📋</button></span>
                 <span class="oab-role">Bạn là: <strong id="oab-my-role">🔵 Đội Xanh</strong></span>
             </div>
             <div class="oab-center">
@@ -122,13 +132,15 @@
                     <span class="oab-vs">VS</span>
                     <span id="oab-red-status" class="oab-pill waiting">🔴 Đỏ: Đang chờ</span>
                 </div>
-                <div id="oab-status-text" class="oab-subtext">Hãy chỉnh sửa code bot của bạn và bấm "Nộp Code" khi hoàn tất!</div>
+                <div id="oab-status-text" class="oab-subtext">Hãy chỉnh sửa code bot của bạn và bấm "Nộp Code" khi hoàn
+                    tất!</div>
             </div>
             <div class="oab-right">
                 <button id="online-submit-code-btn" class="action-btn btn-primary btn-submit-code">
                     📤 Nộp Code Thi Đấu
                 </button>
-                <button id="online-exit-room-btn" class="action-btn btn-secondary btn-sm" title="Rời khỏi phòng đấu này">
+                <button id="online-exit-room-btn" class="action-btn btn-secondary btn-sm"
+                    title="Rời khỏi phòng đấu này">
                     🚪 Rời Phòng
                 </button>
             </div>
@@ -136,7 +148,7 @@
 
         <!-- Main Workspace (Split View: Board on Left, Code Studio on Right) -->
         <main class="arena-main-workspace">
-            
+
             <!-- Left Panel: Chess Board & Status -->
             <section class="arena-board-section">
                 <!-- Match Status Ribbon -->
@@ -255,13 +267,15 @@
                             <button id="export-blue-btn" class="tb-btn" title="Tải file về máy">⬇ Xuất</button>
                             <label class="tb-btn tb-file-label" title="Nạp file từ máy">
                                 ⬆ Nạp
-                                <input type="file" id="import-blue-file" accept=".js,.py,.cpp,.txt" style="display:none;">
+                                <input type="file" id="import-blue-file" accept=".js,.py,.cpp,.txt"
+                                    style="display:none;">
                             </label>
                         </div>
                     </div>
                     <div class="editor-container" id="editor-blue"></div>
                     <div class="editor-statusbar">
-                        <span id="blue-editor-hint">Lập trình bot cho Đội Xanh (Mục tiêu: Đưa quân tới ô I9 ở phía bên kia bàn cờ)</span>
+                        <span id="blue-editor-hint">Lập trình bot cho Đội Xanh (Mục tiêu: Đưa quân tới ô I9 ở phía bên
+                            kia bàn cờ)</span>
                         <span class="auto-save-tag">Tự động lưu vào trình duyệt ✓</span>
                     </div>
                 </div>
@@ -294,13 +308,15 @@
                             <button id="export-red-btn" class="tb-btn" title="Tải file về máy">⬇ Xuất</button>
                             <label class="tb-btn tb-file-label" title="Nạp file từ máy">
                                 ⬆ Nạp
-                                <input type="file" id="import-red-file" accept=".js,.py,.cpp,.txt" style="display:none;">
+                                <input type="file" id="import-red-file" accept=".js,.py,.cpp,.txt"
+                                    style="display:none;">
                             </label>
                         </div>
                     </div>
                     <div class="editor-container" id="editor-red"></div>
                     <div class="editor-statusbar">
-                        <span id="red-editor-hint">Lập trình bot cho Đội Đỏ (Mục tiêu: Đưa quân tới ô A1 ở phía bên kia bàn cờ)</span>
+                        <span id="red-editor-hint">Lập trình bot cho Đội Đỏ (Mục tiêu: Đưa quân tới ô A1 ở phía bên kia
+                            bàn cờ)</span>
                         <span class="auto-save-tag">Tự động lưu vào trình duyệt ✓</span>
                     </div>
                 </div>
@@ -313,7 +329,8 @@
                                 <span>🏆 BẢNG XẾP HẠNG ELO</span>
                             </div>
                             <div class="leaderboard-user-card" id="user-rank-status">
-                                <span>Bạn: <strong id="lb-user-name">Người chơi</strong> (<strong id="lb-user-elo">1200</strong> Elo)</span>
+                                <span>Bạn: <strong id="lb-user-name">Người chơi</strong> (<strong
+                                        id="lb-user-elo">1200</strong> Elo)</span>
                             </div>
                         </div>
                         <div class="leaderboard-table-wrap">
@@ -349,7 +366,8 @@
                         <button id="clear-console-btn" class="tb-btn">🧹 Xóa Log</button>
                     </div>
                     <div class="bot-terminal" id="bot-console-output">
-                        <div class="terminal-empty">Chưa có log từ Bot. Nhấn "Bắt đầu đấu" để xem nhật ký tính toán!</div>
+                        <div class="terminal-empty">Chưa có log từ Bot. Nhấn "Bắt đầu đấu" để xem nhật ký tính toán!
+                        </div>
                     </div>
                 </div>
 
@@ -365,28 +383,36 @@
                     <div class="docs-scroll-area">
                         <h2>🎮 Hướng dẫn Lập Trình Bot (Bot Coding Guide)</h2>
                         <p class="docs-intro">
-                            Chào mừng bạn đến với <strong>OTTv2 Code Arena</strong>! Trò chơi là sự kết hợp giữa <em>Cờ vua</em> và <em>Oẳn Tù Tì</em> trên bàn cờ 9x9.
-                            Nhiệm vụ của bạn là lập trình thuật toán trong hàm <code>getNextMove(state, helpers, log)</code> để đưa quân tới đích ở phía đối diện!
+                            Chào mừng bạn đến với <strong>OTTv2 Code Arena</strong>! Trò chơi là sự kết hợp giữa <em>Cờ
+                                vua</em> và <em>Oẳn Tù Tì</em> trên bàn cờ 9x9.
+                            Nhiệm vụ của bạn là lập trình thuật toán trong hàm
+                            <code>getNextMove(state, helpers, log)</code> để đưa quân tới đích ở phía đối diện!
                         </p>
 
                         <div class="docs-card">
                             <h3>🏆 Mục Tiêu Chiến Thắng</h3>
-                            <p>Mục tiêu duy nhất để chiến thắng là <strong>đưa bất kỳ quân nào tới ô đích ở phía đối diện bàn cờ</strong>:</p>
+                            <p>Mục tiêu duy nhất để chiến thắng là <strong>đưa bất kỳ quân nào tới ô đích ở phía đối
+                                    diện bàn cờ</strong>:</p>
                             <ol>
-                                <li><strong>Đội Xanh (Blue):</strong> Đưa quân tới ô <strong>I9</strong> (góc trên phải).</li>
-                                <li><strong>Đội Đỏ (Red):</strong> Đưa quân tới ô <strong>A1</strong> (góc dưới trái).</li>
+                                <li><strong>Đội Xanh (Blue):</strong> Đưa quân tới ô <strong>I9</strong> (góc trên
+                                    phải).</li>
+                                <li><strong>Đội Đỏ (Red):</strong> Đưa quân tới ô <strong>A1</strong> (góc dưới trái).
+                                </li>
                             </ol>
                             <p style="margin-top: 8px; font-size: 0.82rem; color: #64748b; font-style: italic;">
-                                💡 Lưu ý: Ăn quân đối phương theo luật Oẳn Tù Tì nhằm mục đích dọn đường và cản trở đối thủ, chỉ có chạm đích ở phía bên kia mới quyết định chiến thắng!
+                                💡 Lưu ý: Ăn quân đối phương theo luật Oẳn Tù Tì nhằm mục đích dọn đường và cản trở đối
+                                thủ, chỉ có chạm đích ở phía bên kia mới quyết định chiến thắng!
                             </p>
                         </div>
 
                         <div class="docs-card">
                             <h3>📜 Luật Di Chuyển & Ăn Quân</h3>
                             <ul>
-                                <li>Mỗi quân có thể đi <strong>1 bước theo 8 hướng</strong> (như quân Vua trong cờ vua).</li>
+                                <li>Mỗi quân có thể đi <strong>1 bước theo 8 hướng</strong> (như quân Vua trong cờ vua).
+                                </li>
                                 <li><strong>Oẳn tù tì:</strong> ✊ Đấm ăn ✌️ Kéo | ✌️ Kéo ăn ✋ Lá | ✋ Lá ăn ✊ Đấm.</li>
-                                <li><strong>Chặn nhau:</strong> Quân cùng loại không thể ăn nhau và không thể đi đè lên nhau. Quân cùng đội không thể đi vào ô nhau.</li>
+                                <li><strong>Chặn nhau:</strong> Quân cùng loại không thể ăn nhau và không thể đi đè lên
+                                    nhau. Quân cùng đội không thể đi vào ô nhau.</li>
                             </ul>
                         </div>
 
@@ -431,15 +457,18 @@
                                     </tr>
                                     <tr>
                                         <td><code>helpers.canCapture(attacker, defender)</code></td>
-                                        <td>Kiểm tra <code>attacker</code> có ăn được <code>defender</code> theo luật oẳn tù tì không.</td>
+                                        <td>Kiểm tra <code>attacker</code> có ăn được <code>defender</code> theo luật
+                                            oẳn tù tì không.</td>
                                     </tr>
                                     <tr>
                                         <td><code>helpers.simulateMove(board, move)</code></td>
-                                        <td>Mô phỏng nước đi và trả về bàn cờ mới (cho thuật toán Minimax lookahead).</td>
+                                        <td>Mô phỏng nước đi và trả về bàn cờ mới (cho thuật toán Minimax lookahead).
+                                        </td>
                                     </tr>
                                     <tr>
                                         <td><code>helpers.getLegalMoves(player, board)</code></td>
-                                        <td>Lấy tất cả nước đi hợp lệ của <code>player</code> trên <code>board</code>.</td>
+                                        <td>Lấy tất cả nước đi hợp lệ của <code>player</code> trên <code>board</code>.
+                                        </td>
                                     </tr>
                                     <tr>
                                         <td><code>helpers.randomChoice(array)</code></td>
@@ -447,7 +476,9 @@
                                     </tr>
                                     <tr>
                                         <td><code>helpers.toNotation(r, c)</code></td>
-                                        <td>Chuyển tọa độ sang ký hiệu cờ (ví dụ: <code>r=4, c=1</code> thành <code>"B5"</code>).</td>
+                                        <td>Chuyển tọa độ sang ký hiệu cờ (ví dụ: <code>r=4, c=1</code> thành
+                                            <code>"B5"</code>).
+                                        </td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -504,7 +535,8 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="input-player-name">Tên / Nickname của bạn:</label>
-                    <input type="text" id="input-player-name" class="form-input" placeholder="Ví dụ: MinhCode, MasterAI..." maxlength="20">
+                    <input type="text" id="input-player-name" class="form-input"
+                        placeholder="Ví dụ: MinhCode, MasterAI..." maxlength="20">
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="select-preferred-lang">Ngôn ngữ lập trình chính:</label>
@@ -530,22 +562,25 @@
                     <button class="online-tab-btn active" data-tab="online-view-create">Tạo phòng mới</button>
                     <button class="online-tab-btn" data-tab="online-view-join">Vào phòng có sẵn</button>
                 </div>
-                
+
                 <!-- Tab Create Room -->
                 <div id="online-view-create" class="online-view">
                     <p style="font-size:0.85rem; color:var(--theme-ink-muted); margin-bottom:12px;">
                         Tạo một phòng thi đấu để nhận mã phòng chia sẻ cho đối thủ trên máy tính khác cùng thi đấu!
                     </p>
-                    <button id="online-create-room-btn" class="action-btn btn-primary" style="width:100%;">⚡ Tạo Mã Phòng Mới</button>
+                    <button id="online-create-room-btn" class="action-btn btn-primary" style="width:100%;">⚡ Tạo Mã
+                        Phòng Mới</button>
                 </div>
 
                 <!-- Tab Join Room -->
                 <div id="online-view-join" class="online-view" style="display:none;">
                     <div class="form-group">
                         <label class="form-label" for="online-join-code-input">Nhập Mã Phòng (VD: OTT-7291):</label>
-                        <input type="text" id="online-join-code-input" class="form-input" placeholder="Mã phòng..." style="text-transform:uppercase; font-size:1.15rem; text-align:center; letter-spacing:2px;">
+                        <input type="text" id="online-join-code-input" class="form-input" placeholder="Mã phòng..."
+                            style="text-transform:uppercase; font-size:1.15rem; text-align:center; letter-spacing:2px;">
                     </div>
-                    <button id="online-join-room-btn" class="action-btn btn-primary" style="width:100%; margin-top:8px;">🚀 Tham Gia Phòng</button>
+                    <button id="online-join-room-btn" class="action-btn btn-primary"
+                        style="width:100%; margin-top:8px;">🚀 Tham Gia Phòng</button>
                 </div>
 
                 <!-- Room Lobby View -->
@@ -553,7 +588,8 @@
                     <div class="room-code-display">
                         <span style="font-size:0.8rem; font-weight:700;">MÃ PHÒNG THI ĐẤU:</span>
                         <span id="room-pin-label" class="room-pin">OTT-XXXX</span>
-                        <span style="font-size:0.75rem; color:var(--theme-ink-muted);">Gửi mã này cho bạn bè ở máy khác để cùng so tài code!</span>
+                        <span style="font-size:0.75rem; color:var(--theme-ink-muted);">Gửi mã này cho bạn bè ở máy khác
+                            để cùng so tài code!</span>
                     </div>
 
                     <div class="room-slots">
@@ -571,12 +607,15 @@
                         </div>
                     </div>
 
-                    <div id="online-sync-status" style="font-size:0.83rem; font-weight:700; text-align:center; color:var(--theme-ink); background:var(--theme-surface-muted); padding:8px; border-radius:6px; border:1px solid var(--theme-line);">
-                        💡 Hãy vào màn hình soạn code để chuẩn bị thuật toán. Trận đấu CHỈ BẮT ĐẦU khi cả 2 người chơi đều bấm nút "Nộp Code"!
+                    <div id="online-sync-status"
+                        style="font-size:0.83rem; font-weight:700; text-align:center; color:var(--theme-ink); background:var(--theme-surface-muted); padding:8px; border-radius:6px; border:1px solid var(--theme-line);">
+                        💡 Hãy vào màn hình soạn code để chuẩn bị thuật toán. Trận đấu CHỈ BẮT ĐẦU khi cả 2 người chơi
+                        đều bấm nút "Nộp Code"!
                     </div>
 
                     <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
-                        <button id="online-go-code-btn" class="action-btn btn-gold" style="width:100%; font-size:1rem; padding:10px;">
+                        <button id="online-go-code-btn" class="action-btn btn-gold"
+                            style="width:100%; font-size:1rem; padding:10px;">
                             ✍️ Vào Màn Hình Soạn Code
                         </button>
                         <div style="display:flex; gap:8px;">
@@ -600,7 +639,8 @@
                     <button id="close-sim-btn" class="close-x-btn">&times;</button>
                 </div>
                 <p class="sim-desc">
-                    Chạy mô phỏng đấu đối kháng không giao diện ở tốc độ cực cao để kiểm chứng độ hiệu quả thuật toán bot của bạn!
+                    Chạy mô phỏng đấu đối kháng không giao diện ở tốc độ cực cao để kiểm chứng độ hiệu quả thuật toán
+                    bot của bạn!
                 </p>
 
                 <div class="sim-controls-row">
@@ -610,7 +650,7 @@
                         <option value="50" selected>50 Trận (Chuẩn)</option>
                         <option value="100">100 Trận (Chính xác cao)</option>
                     </select>
-                    <button id="start-sim-btn" class="action-btn btn-gold">🚀 Bắt đầu mô phỏng</button>
+                    <button id="start-sim-btn" class="action-btn btn-gold">Bắt đầu mô phỏng</button>
                 </div>
 
                 <!-- Progress Bar -->
@@ -648,4 +688,5 @@
     <script src="bots.js"></script>
     <script src="logic.js"></script>
 </body>
+
 </html>
