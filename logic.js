@@ -537,7 +537,31 @@
                     botError = new Error(data.error || 'Runner error');
                 }
             } catch (err) {
-                botError = err;
+                // If the local backend server is not running (e.g. static offline play without node/python server)
+                // simulate the standard template strategy so game doesn't stall, while warning in console
+                currentLogs.push(`[Offline Runner Fallback] Không kết nối được server biên dịch (${err.message}). Đang dùng giả lập chiến thuật mẫu.`);
+                const targetGoal = player === 1 ? { r: 0, c: 8 } : { r: 8, c: 0 };
+                const winningMove = state.legalMoves.find(m => m.to.r === targetGoal.r && m.to.c === targetGoal.c);
+                if (winningMove) {
+                    rawMove = winningMove;
+                } else {
+                    const captureMove = state.legalMoves.find(m => m.hasCapture);
+                    if (captureMove) {
+                        rawMove = captureMove;
+                    } else {
+                        // Move minimizing distance to goal
+                        let best = state.legalMoves[0];
+                        let bestDist = 999;
+                        for (const m of state.legalMoves) {
+                            const d = Math.max(Math.abs(m.to.r - targetGoal.r), Math.abs(m.to.c - targetGoal.c));
+                            if (d < bestDist) {
+                                bestDist = d;
+                                best = m;
+                            }
+                        }
+                        rawMove = best;
+                    }
+                }
             }
         } else {
             try {
@@ -1343,7 +1367,15 @@
     function getDefaultCodeForLang(player, lang) {
         const key = `ott_bot_code_${player === 1 ? 'blue' : 'red'}_${lang}`;
         const saved = localStorage.getItem(key);
-        if (saved) return saved;
+        // If saved code is invalid or corrupted (e.g. JS function saved under python or cpp), fall back to template
+        if (saved && saved.trim()) {
+            if ((lang === 'python' || lang === 'cpp') && saved.includes('function getNextMove(')) {
+                // Corrupted localStorage with JS code, clear it
+                localStorage.removeItem(key);
+            } else {
+                return saved;
+            }
+        }
         if (window.MULTI_LANG_TEMPLATES && window.MULTI_LANG_TEMPLATES[lang]) {
             return player === 1 ? window.MULTI_LANG_TEMPLATES[lang].blue : window.MULTI_LANG_TEMPLATES[lang].red;
         }
@@ -2157,9 +2189,22 @@
         if (blueTemplateSel) {
             blueTemplateSel.addEventListener('change', (e) => {
                 const key = e.target.value;
-                if (key && window.BOT_PRESETS && window.BOT_PRESETS[key]) {
-                    if (confirm("Tải mẫu bot này vào khung code Đội Xanh? Code hiện tại sẽ được thay thế.")) {
-                        setEditorCode(1, window.BOT_PRESETS[key]);
+                if (key) {
+                    let codeToLoad = null;
+                    if (blueLang === 'python' || blueLang === 'cpp') {
+                        if (key === 'starterBlue') {
+                            codeToLoad = window.MULTI_LANG_TEMPLATES?.[blueLang]?.blue;
+                        } else {
+                            alert(`Mẫu "${key}" chỉ có phiên bản JavaScript. Để sử dụng mẫu này, vui lòng chuyển ngôn ngữ sang JavaScript.`);
+                        }
+                    } else if (window.BOT_PRESETS && window.BOT_PRESETS[key]) {
+                        codeToLoad = window.BOT_PRESETS[key];
+                    }
+
+                    if (codeToLoad) {
+                        if (confirm("Tải mẫu bot này vào khung code Đội Xanh? Code hiện tại sẽ được thay thế.")) {
+                            setEditorCode(1, codeToLoad);
+                        }
                     }
                 }
                 blueTemplateSel.value = "";
@@ -2170,9 +2215,22 @@
         if (redTemplateSel) {
             redTemplateSel.addEventListener('change', (e) => {
                 const key = e.target.value;
-                if (key && window.BOT_PRESETS && window.BOT_PRESETS[key]) {
-                    if (confirm("Tải mẫu bot này vào khung code Đội Đỏ? Code hiện tại sẽ được thay thế.")) {
-                        setEditorCode(2, window.BOT_PRESETS[key]);
+                if (key) {
+                    let codeToLoad = null;
+                    if (redLang === 'python' || redLang === 'cpp') {
+                        if (key === 'starterRed') {
+                            codeToLoad = window.MULTI_LANG_TEMPLATES?.[redLang]?.red;
+                        } else {
+                            alert(`Mẫu "${key}" chỉ có phiên bản JavaScript. Để sử dụng mẫu này, vui lòng chuyển ngôn ngữ sang JavaScript.`);
+                        }
+                    } else if (window.BOT_PRESETS && window.BOT_PRESETS[key]) {
+                        codeToLoad = window.BOT_PRESETS[key];
+                    }
+
+                    if (codeToLoad) {
+                        if (confirm("Tải mẫu bot này vào khung code Đội Đỏ? Code hiện tại sẽ được thay thế.")) {
+                            setEditorCode(2, codeToLoad);
+                        }
                     }
                 }
                 redTemplateSel.value = "";
@@ -2199,16 +2257,20 @@
         const resetBlue = document.getElementById('reset-blue-btn');
         if (resetBlue) {
             resetBlue.addEventListener('click', () => {
-                if (confirm("Khôi phục code Đội Xanh về mẫu mặc định?")) {
-                    setEditorCode(1, window.BOT_PRESETS.starterBlue);
+                if (confirm(`Khôi phục code Đội Xanh (${blueLang.toUpperCase()}) về mẫu mặc định?`)) {
+                    localStorage.removeItem(`ott_bot_code_blue_${blueLang}`);
+                    const defaultCode = getDefaultCodeForLang(1, blueLang);
+                    setEditorCode(1, defaultCode);
                 }
             });
         }
         const resetRed = document.getElementById('reset-red-btn');
         if (resetRed) {
             resetRed.addEventListener('click', () => {
-                if (confirm("Khôi phục code Đội Đỏ về mẫu mặc định?")) {
-                    setEditorCode(2, window.BOT_PRESETS.starterRed);
+                if (confirm(`Khôi phục code Đội Đỏ (${redLang.toUpperCase()}) về mẫu mặc định?`)) {
+                    localStorage.removeItem(`ott_bot_code_red_${redLang}`);
+                    const defaultCode = getDefaultCodeForLang(2, redLang);
+                    setEditorCode(2, defaultCode);
                 }
             });
         }
