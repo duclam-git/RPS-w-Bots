@@ -135,3 +135,5 @@ Truy cập trình duyệt: **`http://localhost:3000`** (hoặc `http://<dia_chi_
 
 Mở **`http://localhost:3000/arena.html`**: tạo giải (loại trực tiếp / vòng tròn / chia bảng + knockout), đăng ký bot, xem nhánh đấu & bảng xếp hạng trực tiếp, xem lại mọi trận đã đấu.
 Dữ liệu lưu trong SQLite (`data/ott.db`). Đặt `ADMIN_KEY` trước khi chạy `npm start` để dùng quyền admin. Chi tiết: [`docs/TOURNAMENT.md`](docs/TOURNAMENT.md) [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) (tài khoản, Elo, sửa lỗi chạy bot) [`docs/ADMIN.md`](docs/ADMIN.md) (trang quản trị: luật, thế cờ, thời gian, sửa kết quả) và [`docs/SECURITY.md`](docs/SECURITY.md) (cách ly code bot — nên đọc trước khi mở ra Internet). Chạy kiểm thử: `npm test`.
+
+Database mới tự tạo tài khoản quản trị mặc định `admin` / `adminadmin`. Đổi mật khẩu ngay sau lần đăng nhập đầu tiên; tài khoản admin vẫn cần `ADMIN_KEY` khi đăng nhập.

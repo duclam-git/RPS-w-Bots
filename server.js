@@ -521,11 +521,17 @@ runner.detectToolchains().then(t => {
 });
 tournament.recoverOnBoot();
 
-server.listen(PORT, () => {
-    console.log(`⚔️ OTTv2 Code Arena Server running at http://localhost:${PORT}`);
-    console.log(`🏆 Giải đấu & lịch sử trận:  http://localhost:${PORT}/arena.html`);
-    if (auth.ADMIN_KEY_IS_GENERATED) {
-        console.log(`🔑 ADMIN_KEY (tự sinh, đổi mỗi lần chạy): ${auth.ADMIN_KEY}`);
-        console.log('   Đặt biến môi trường ADMIN_KEY để giữ khóa ổn định. Tài khoản có role admin cần khóa này mỗi lần đăng nhập.');
-    }
+auth.ensureDefaultAdmin().then((created) => {
+    if (created) console.log('Tài khoản admin mặc định đã được tạo. Đăng nhập bằng admin / adminadmin và đổi mật khẩu ngay.');
+    server.listen(PORT, () => {
+        console.log(`⚔️ OTTv2 Code Arena Server running at http://localhost:${PORT}`);
+        console.log(`🏆 Giải đấu & lịch sử trận:  http://localhost:${PORT}/arena.html`);
+        if (auth.ADMIN_KEY_IS_GENERATED) {
+            console.log(`🔑 ADMIN_KEY (tự sinh, đổi mỗi lần chạy): ${auth.ADMIN_KEY}`);
+            console.log('   Đặt biến môi trường ADMIN_KEY để giữ khóa ổn định. Tài khoản có role admin cần khóa này mỗi lần đăng nhập.');
+        }
+    });
+}).catch((err) => {
+    console.error('Không thể khởi tạo tài khoản admin mặc định:', err);
+    process.exitCode = 1;
 });

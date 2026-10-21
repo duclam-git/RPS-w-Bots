@@ -52,6 +52,22 @@ async function verifyPassword(password, stored) {
     return crypto.timingSafeEqual(key, expected);
 }
 
+/** Create the documented first-run administrator only when the users table is empty. */
+async function ensureDefaultAdmin() {
+    const exists = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+    if (exists) return false;
+
+    const hash = await hashPassword('adminadmin');
+    return db.transaction(() => {
+        // Recheck after hashing in case another initializer created an account meanwhile.
+        if (db.prepare('SELECT COUNT(*) AS n FROM users').get().n) return false;
+        db.prepare(`INSERT INTO users (username, password_hash, role, created_at)
+                    VALUES ('admin', ?, 'admin', ?)`)
+            .run(hash, Date.now());
+        return true;
+    })();
+}
+
 // Used to burn the same time when the username does not exist (no user enumeration by timing)
 const DUMMY_HASH_PROMISE = hashPassword('dummy-password-for-timing');
 
@@ -388,5 +404,5 @@ module.exports = {
     attachUser, requireUser, requireAdmin, sameOriginOnly,
     userFromCookieHeader, applyRatedResult, leaderboard, createRouter, publicUser,
     // exposed for tests
-    hashPassword, verifyPassword
+    hashPassword, verifyPassword, ensureDefaultAdmin
 };

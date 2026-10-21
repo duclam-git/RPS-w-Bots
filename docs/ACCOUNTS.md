@@ -13,6 +13,10 @@
 | Đổi mật khẩu | Trang hồ sơ của mình; mọi thiết bị khác bị đăng xuất. |
 | Admin | Đăng nhập → bấm 🔑 → nhập `ADMIN_KEY` **một lần** → tài khoản thành admin vĩnh viễn (cột `role`). Header `X-Admin-Key` vẫn dùng được cho script. |
 
+### Tài khoản admin mặc định
+
+Khi khởi động với database chưa có tài khoản nào, server tự tạo `admin` với mật khẩu `adminadmin` và quyền admin. Đổi mật khẩu ngay sau lần đăng nhập đầu tiên. Đặt `ADMIN_KEY` ổn định trước khi chạy server; tài khoản admin cần khóa này khi đăng nhập. Nếu bảng `users` đã có ít nhất một tài khoản, bước khởi tạo không tạo hoặc sửa tài khoản nào.
+
 Tên trùng bot hệ thống (Grandmaster AI, Tactical AI…) bị chặn khi đăng ký; khách (chưa đăng nhập) dùng tên đó sẽ bị đổi thành `… (khách)`.
 
 ## 2. Thành tích và Elo
