@@ -1,0 +1,9 @@
+node_modules
+.git
+data
+temp_bots
+test
+docs
+*.zip
+.env
+npm-debug.log

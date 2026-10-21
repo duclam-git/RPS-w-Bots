@@ -1,0 +1,33 @@
+# /etc/systemd/system/ott.service     (systemctl daemon-reload && systemctl enable --now ott)
+[Unit]
+Description=OTTv2 Code Arena
+After=network.target
+
+[Service]
+Type=simple
+User=ott
+Group=ott
+WorkingDirectory=/opt/ott
+EnvironmentFile=/opt/ott/.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=3
+# SIGTERM -> graceful shutdown (tournaments resume on the next start); give it time to finish
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# Hardening: the server itself (and so the bots it launches) gets a minimal view of the machine.
+# NOTE: bubblewrap needs unprivileged user namespaces, so do NOT add RestrictNamespaces= / PrivateUsers= here.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=no
+ReadWritePaths=/opt/ott/data /opt/ott/temp_bots
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryMax=2G
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

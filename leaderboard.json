@@ -1,0 +1,72 @@
+[
+  {
+    "name": "Grandmaster AI",
+    "elo": 1650,
+    "matches": 84,
+    "wins": 68,
+    "losses": 12,
+    "draws": 4,
+    "lang": "cpp",
+    "isBot": true
+  },
+  {
+    "name": "Tactical AI",
+    "elo": 1520,
+    "matches": 62,
+    "wins": 45,
+    "losses": 14,
+    "draws": 3,
+    "lang": "js",
+    "isBot": true
+  },
+  {
+    "name": "Python Hunter",
+    "elo": 1430,
+    "matches": 49,
+    "wins": 32,
+    "losses": 15,
+    "draws": 2,
+    "lang": "py",
+    "isBot": true
+  },
+  {
+    "name": "Goal Rusher AI",
+    "elo": 1340,
+    "matches": 38,
+    "wins": 21,
+    "losses": 15,
+    "draws": 2,
+    "lang": "js",
+    "isBot": true
+  },
+  {
+    "name": "Người chơi 656",
+    "elo": 1201,
+    "matches": 2,
+    "wins": 1,
+    "losses": 1,
+    "draws": 0,
+    "lang": "javascript",
+    "isBot": false
+  },
+  {
+    "name": "Người chơi 790",
+    "elo": 1199,
+    "matches": 2,
+    "wins": 1,
+    "losses": 1,
+    "draws": 0,
+    "lang": "javascript",
+    "isBot": false
+  },
+  {
+    "name": "Random AI",
+    "elo": 1000,
+    "matches": 30,
+    "wins": 6,
+    "losses": 23,
+    "draws": 1,
+    "lang": "js",
+    "isBot": true
+  }
+]
