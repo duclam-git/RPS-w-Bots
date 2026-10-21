@@ -215,6 +215,23 @@ tr.me td { background: var(--gold-bg); font-weight: 700; }
 /* ---------- admin ---------- */
 .tabs { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .tabs .btn.active { background: var(--ink); color: var(--surface); }
+.admin-overview-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .9rem; margin: 0; }
+.admin-overview-grid .overview-card {
+    min-height: 174px; padding: 1.15rem 1.25rem; text-align: left; border-width: 3px;
+    border-radius: 16px; background: var(--surface); box-shadow: 6px 6px 0 var(--border);
+    display: flex; flex-direction: column; align-items: stretch; justify-content: space-between;
+}
+.overview-card-heading { display: flex; align-items: center; justify-content: space-between; gap: .6rem; color: var(--ink-2); font-size: .9rem; font-weight: 700; }
+.overview-icon { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border-radius: 12px; font-size: 1.25rem; }
+.admin-overview-grid .overview-card .overview-icon { font-size: 1.25rem; letter-spacing: normal; text-transform: none; }
+.overview-users .overview-icon { color: var(--blue); background: var(--blue-bg); }
+.overview-tournaments .overview-icon { color: var(--green); background: #dcfce7; }
+.overview-submissions .overview-icon { color: var(--gold); background: var(--gold-bg); }
+.overview-matches .overview-icon { color: var(--red); background: var(--red-bg); }
+.admin-overview-grid .overview-card b { display: block; margin-top: .5rem; font-size: 2rem; line-height: 1.1; font-family: 'Space Grotesk', sans-serif; }
+.admin-overview-grid .overview-card small { display: block; margin-top: .45rem; color: var(--ink-2); font-size: .83rem; }
+@media (max-width: 900px) { .admin-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .admin-overview-grid { grid-template-columns: 1fr; } }
 .seg { display: inline-flex; border: 2px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg button { font: inherit; font-weight: 700; font-size: .85rem; padding: .35rem .7rem; border: 0; border-right: 2px solid var(--border); background: var(--surface); color: var(--ink); cursor: pointer; }
 .seg button:last-child { border-right: 0; }

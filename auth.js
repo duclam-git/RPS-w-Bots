@@ -258,7 +258,7 @@ function createRouter({ rateLimit }) {
     }));
 
     router.post('/auth/login', loginLimit, wrap(async (req, res) => {
-        const { username, password } = req.body || {};
+        const { username, password, adminKey } = req.body || {};
         if (typeof username !== 'string' || typeof password !== 'string') {
             return res.status(400).json({ error: 'Thiếu tên đăng nhập hoặc mật khẩu' });
         }
@@ -271,6 +271,9 @@ function createRouter({ rateLimit }) {
         if (!ok) {
             noteFailure(username);
             return res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu' });
+        }
+        if (row.role === 'admin' && !validAdminKey(adminKey)) {
+            return res.status(403).json({ error: 'Tài khoản admin cần ADMIN_KEY hợp lệ' });
         }
         failures.delete(username.toLowerCase());
         startSession(req, res, row.id);

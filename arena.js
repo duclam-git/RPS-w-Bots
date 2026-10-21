@@ -33,14 +33,11 @@
 
     // ---------- accounts & admin ----------
     // Logged-in state lives in an HttpOnly session cookie; the page only learns it through /api/auth/me.
-    // `adminKey` is the legacy/scripting path (X-Admin-Key header) for people who are not logged in.
-    let adminKey = sessionStorage.getItem('ott_admin_key') || '';
     let me = null;          // { id, username, role, elo, ... } or null
     let isAdmin = false;
 
     async function api(method, url, body, headers) {
         const h = { 'Content-Type': 'application/json', ...(headers || {}) };
-        if (adminKey) h['X-Admin-Key'] = adminKey;
         const res = await fetch(url, { method, headers: h, body: body ? JSON.stringify(body) : undefined });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -52,13 +49,11 @@
     }
 
     function renderAuthButtons() {
-        const ub = $('#user-btn'), lo = $('#logout-btn'), ab = $('#admin-btn');
+        const ub = $('#user-btn'), lo = $('#logout-btn');
         ub.textContent = me ? `👤 ${me.username} · ${me.elo}` : '🔐 Đăng nhập';
         ub.title = me ? 'Xem hồ sơ của bạn' : 'Đăng nhập / Tạo tài khoản';
         lo.style.display = me ? '' : 'none';
-        ab.textContent = isAdmin ? '🛡 Admin' : '🔑 Admin';
         $('#nav-admin').style.display = isAdmin ? '' : 'none';
-        ab.title = isAdmin ? 'Bạn đang có quyền quản trị' : 'Nhập khóa admin để nhận quyền quản trị';
     }
 
     async function refreshMe() {
@@ -67,7 +62,6 @@
             me = out.user;
             isAdmin = !!out.isAdmin;
         } catch (e) { me = null; isAdmin = false; }
-        if (adminKey && !isAdmin) { adminKey = ''; sessionStorage.removeItem('ott_admin_key'); }
         renderAuthButtons();
     }
 
@@ -81,6 +75,9 @@
         $('#auth-pass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
         $('#auth-tab-login').classList.toggle('btn-primary', mode === 'login');
         $('#auth-tab-register').classList.toggle('btn-primary', mode === 'register');
+        $('#auth-admin-key-wrap').hidden = true;
+        $('#auth-admin-key').required = false;
+        $('#auth-admin-key').value = '';
         $('#auth-msg').textContent = '';
     }
     function openAuth(mode) {
@@ -97,45 +94,25 @@
         const btn = $('#auth-submit');
         btn.disabled = true;
         try {
-            await api('POST', `/api/auth/${authMode}`, { username: $('#auth-user').value.trim(), password: $('#auth-pass').value });
+            const body = { username: $('#auth-user').value.trim(), password: $('#auth-pass').value };
+            if (!$('#auth-admin-key-wrap').hidden) body.adminKey = $('#auth-admin-key').value;
+            await api('POST', `/api/auth/${authMode}`, body);
             $('#auth-pass').value = '';
+            $('#auth-admin-key').value = '';
             closeAuth();
             await refreshMe();
             toast(authMode === 'login' ? `Xin chào, ${me.username}!` : `Đã tạo tài khoản ${me.username}`);
             route();
-        } catch (e) { $('#auth-msg').textContent = '❌ ' + e.message; }
+        } catch (e) { $('#auth-msg').textContent = 'Lỗi: ' + e.message; if (e.status === 403) { $('#auth-admin-key-wrap').hidden = false; $('#auth-admin-key').required = true; $('#auth-admin-key').focus(); } }
         finally { btn.disabled = false; }
     }
     $('#auth-submit').addEventListener('click', submitAuth);
     $('#auth-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth(); });
     $('#auth-user').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#auth-pass').focus(); });
-
     $('#user-btn').addEventListener('click', () => { if (me) location.hash = `#/profile/${encodeURIComponent(me.username)}`; else openAuth('login'); });
     $('#logout-btn').addEventListener('click', async () => {
         try { await api('POST', '/api/auth/logout'); } catch (e) { }
-        adminKey = ''; sessionStorage.removeItem('ott_admin_key');
-        await refreshMe();
-        toast('Đã đăng xuất');
-        route();
-    });
-
-    $('#admin-btn').addEventListener('click', async () => {
-        if (isAdmin) return toast(me ? 'Tài khoản của bạn đã là admin' : 'Đang dùng khóa admin tạm thời (hết khi đóng tab)');
-        const key = prompt('Nhập ADMIN_KEY (xem trong console của server):');
-        if (!key) return;
-        try {
-            if (me) {   // logged in: the key is consumed once and the ACCOUNT becomes admin
-                await api('POST', '/api/auth/claim-admin', { key: key.trim() });
-                toast('Tài khoản của bạn đã trở thành admin');
-            } else {    // not logged in: keep the key for this tab only
-                adminKey = key.trim();
-                await api('POST', '/api/admin/check');
-                sessionStorage.setItem('ott_admin_key', adminKey);
-                toast('Đã bật quyền admin tạm thời (đăng nhập để lưu vĩnh viễn)');
-            }
-        } catch (e) { adminKey = ''; sessionStorage.removeItem('ott_admin_key'); toast('Sai khóa admin', true); }
-        await refreshMe();
-        route();
+        location.replace('index.html');
     });
 
     // ---------- theme (shares the main page's key) ----------
@@ -609,7 +586,7 @@
     // Admin: dashboard (tournaments, users) and the tournament / rules editor (issue #4)
     // =====================================================================
     async function viewAdmin(tab) {
-        tab = tab || 'tournaments';
+        tab = tab || 'overview';
         if (!isAdmin) {
             view.innerHTML = `<div class="card empty">🔒 Chỉ admin mới vào được trang này.<br>Đăng nhập rồi bấm 🔑 và nhập ADMIN_KEY một lần để nhận quyền.</div>`;
             return;
@@ -617,12 +594,42 @@
         view.innerHTML = `<div class="row between" style="margin-bottom:1rem"><h1>🛠 Quản trị</h1>
             <a class="btn btn-primary" href="#/admin/edit/new" style="text-decoration:none">➕ Tạo giải đấu</a></div>
             <div class="tabs">
+                <button class="btn ${tab === 'overview' ? 'active' : ''}" data-tab="overview">📊 Tổng quan</button>
                 <button class="btn ${tab === 'tournaments' ? 'active' : ''}" data-tab="tournaments">🏆 Giải đấu</button>
                 <button class="btn ${tab === 'users' ? 'active' : ''}" data-tab="users">👥 Người dùng</button>
                 <button class="btn ${tab === 'security' ? 'active' : ''}" data-tab="security">🛡 Bảo mật</button></div>
             <div id="adm-body"><div class="empty">Đang tải…</div></div>`;
         view.querySelector('.tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) viewAdmin(b.dataset.tab); });
-        if (tab === 'users') await adminUsers(); else if (tab === 'security') await adminSecurity(); else await adminTournaments();
+        if (tab === 'users') await adminUsers();
+        else if (tab === 'security') await adminSecurity();
+        else if (tab === 'tournaments') await adminTournaments();
+        else await adminOverview();
+    }
+
+    async function adminOverview() {
+        const [stats, tournaments] = await Promise.all([
+            api('GET', '/api/admin/overview'),
+            api('GET', '/api/tournaments')
+        ]);
+        const openTournaments = tournaments.filter(t => t.status === 'registration' || t.status === 'running').length;
+        $('#adm-body').innerHTML = `<div class="stat-grid admin-overview-grid">
+            <div class="stat overview-card overview-users">
+                <div class="overview-card-heading"><span>Người chơi toàn hệ thống</span><span class="overview-icon" aria-hidden="true">♟</span></div>
+                <b>${stats.users}</b><small>Tài khoản đã đăng ký</small>
+            </div>
+            <div class="stat overview-card overview-tournaments">
+                <div class="overview-card-heading"><span>Giải đấu đang mở</span><span class="overview-icon" aria-hidden="true">♜</span></div>
+                <b>${openTournaments}</b><small>Trong ${tournaments.length} giải đấu</small>
+            </div>
+            <div class="stat overview-card overview-submissions">
+                <div class="overview-card-heading"><span>Bài nộp của người dùng</span><span class="overview-icon" aria-hidden="true">⌘</span></div>
+                <b>${stats.submissions}</b><small>Bot đã đăng ký vào giải đấu</small>
+            </div>
+            <div class="stat overview-card overview-matches">
+                <div class="overview-card-heading"><span>Trận đấu đang chạy</span><span class="overview-icon" aria-hidden="true">⚔</span></div>
+                <b>${stats.matches}</b><small>Đang diễn ra trực tiếp</small>
+            </div>
+        </div>`;
     }
 
     async function adminTournaments() {

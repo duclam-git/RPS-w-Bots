@@ -37,7 +37,29 @@
 </head>
 
 <body>
-    <div class="arena-app" id="arena-app">
+    <section id="auth-gate" class="auth-gate" aria-labelledby="auth-gate-title">
+        <form id="auth-gate-form" class="auth-gate-card">
+            <div class="auth-gate-mark">⚔️</div>
+            <h1 id="auth-gate-title">Chào mừng đến OTTv2</h1>
+            <p class="auth-gate-subtitle">Đăng nhập hoặc tạo tài khoản để vào đấu trường.</p>
+            <div class="auth-gate-tabs">
+                <button type="button" class="active" data-auth-mode="login">Đăng nhập</button>
+                <button type="button" data-auth-mode="register">Tạo tài khoản</button>
+            </div>
+            <label>Tên đăng nhập
+                <input id="gate-username" name="username" autocomplete="username" minlength="3" maxlength="20" required placeholder="3–20 ký tự: chữ, số, . _ -">
+            </label>
+            <label>Mật khẩu
+                <input id="gate-password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required placeholder="Tối thiểu 8 ký tự">
+            </label>
+            <label id="gate-admin-key-wrap" hidden>ADMIN_KEY
+                <input id="gate-admin-key" name="adminKey" type="password" autocomplete="off" placeholder="Nhập khóa admin">
+            </label>
+            <p id="gate-message" class="auth-gate-message" role="alert"></p>
+            <button id="gate-submit" class="auth-gate-submit" type="submit">Đăng nhập</button>
+        </form>
+    </section>
+    <div class="arena-app" id="arena-app" style="display:none">
         <!-- Top Navigation / Arena Header -->
         <header class="arena-header">
             <div class="header-branding">
@@ -88,8 +110,11 @@
                         👤 <span id="header-player-name">Người chơi</span> (<strong
                             id="header-player-elo">1200</strong>)
                     </button>
-                    <a id="account-link-btn" class="profile-btn" href="arena.html#/login" style="text-decoration:none"
-                        title="Đăng nhập để lưu thành tích và được tính Elo">🔐 Đăng nhập</a>
+                    <a id="account-link-btn" class="profile-btn" href="arena.html#/profile" style="text-decoration:none"
+                        title="Tài khoản">🔐 Tài khoản</a>
+                    <a id="main-admin-link" class="profile-btn" href="arena.html#/admin" style="display:none;text-decoration:none"
+                        title="Quản trị">🛠 Quản trị</a>
+                    <button id="main-logout-btn" class="profile-btn" type="button" style="display:none">Đăng xuất</button>
                     <button id="theme-toggle-btn" class="theme-toggle-btn" title="Chuyển chế độ ban đêm/ban ngày">
                         🌙 Ban đêm
                     </button>
@@ -701,6 +726,7 @@
     <script src="elo.js"></script>
     <script src="bot_templates.js"></script>
     <script src="bots.js"></script>
+    <script src="auth-gate.js"></script>
     <script src="logic.js"></script>
 </body>
 

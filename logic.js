@@ -2643,10 +2643,14 @@
     }
 
     // Auto-init on DOM loaded
+    function initAfterAuthentication() {
+        if (window.OTT_AUTH && window.OTT_AUTH.ready) init();
+        else document.addEventListener('ott-authenticated', init, { once: true });
+    }
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
+        document.addEventListener('DOMContentLoaded', initAfterAuthentication);
     } else {
-        init();
+        initAfterAuthentication();
     }
 
     // Expose global for debugging if needed

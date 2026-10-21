@@ -191,6 +191,8 @@ function liveForTournament(tid) {
     }));
 }
 
+function liveGameCount() { return liveGames.size; }
+
 // =====================================================================
 // Create / register / start
 // =====================================================================
@@ -916,5 +918,5 @@ module.exports = {
     // manager
     setIO, HttpError, createTournament, updateTournament, resetSeries, setSeriesResult, registerEntry, updateEntry, removeEntry, startTournament,
     run, pause, deleteTournament, recoverOnBoot, listTournaments, getTournamentDetail,
-    liveForTournament
+    liveForTournament, liveGameCount
 };

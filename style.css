@@ -47,6 +47,46 @@ body {
     padding: 12px;
 }
 
+.auth-gate {
+    min-height: calc(100vh - 24px);
+    display: grid;
+    place-items: center;
+    padding: 24px 14px;
+}
+.auth-gate[hidden] { display: none; }
+.auth-gate-card {
+    width: min(100%, 420px);
+    padding: 32px;
+    display: grid;
+    gap: 16px;
+    background: var(--theme-surface);
+    border: 3px solid var(--theme-border);
+    border-radius: 16px;
+    box-shadow: 7px 7px 0 var(--theme-border);
+}
+.auth-gate-mark { font-size: 2.25rem; }
+.auth-gate-card h1 { font-family: 'Space Grotesk', sans-serif; font-size: 1.65rem; }
+.auth-gate-subtitle { color: var(--theme-ink-muted); line-height: 1.5; }
+.auth-gate-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.auth-gate-tabs button, .auth-gate-submit {
+    padding: 11px 14px;
+    border: 2px solid var(--theme-border);
+    border-radius: 8px;
+    background: var(--theme-surface-muted);
+    color: var(--theme-ink);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+.auth-gate-tabs button.active, .auth-gate-submit { background: var(--theme-blue); color: white; }
+.auth-gate-card label { display: grid; gap: 7px; font-size: .9rem; font-weight: 700; }
+.auth-gate-card [hidden] { display: none; }
+.auth-gate-card input { width: 100%; padding: 12px; border: 2px solid var(--theme-border); border-radius: 8px; font: inherit; }
+.auth-gate-card input:focus { outline: 3px solid var(--theme-blue-glow); }
+.auth-gate-message { min-height: 1.25em; color: var(--theme-red); font-size: .9rem; }
+.auth-gate-submit:disabled { opacity: .65; cursor: wait; }
+#main-logout-btn { cursor: pointer; }
+
 /* App Wrapper */
 .arena-app {
     max-width: 1440px;

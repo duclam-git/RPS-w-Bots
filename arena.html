@@ -26,7 +26,6 @@
         <div class="hub-tools">
             <button id="user-btn" class="btn btn-ghost" title="Tài khoản">🔐 Đăng nhập</button>
             <button id="logout-btn" class="btn btn-ghost" style="display:none" title="Đăng xuất">⏏</button>
-            <button id="admin-btn" class="btn btn-ghost" title="Quyền quản trị">🔑 Admin</button>
             <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện sáng/tối">🌙</button>
         </div>
     </header>
@@ -40,6 +39,7 @@
         <div class="form-grid" style="grid-template-columns:1fr">
             <label>Tên đăng nhập<input id="auth-user" autocomplete="username" maxlength="20" placeholder="3–20 ký tự: chữ, số, . _ -"></label>
             <label>Mật khẩu<input id="auth-pass" type="password" autocomplete="current-password" maxlength="128" placeholder="Tối thiểu 8 ký tự"></label>
+            <label id="auth-admin-key-wrap" hidden>ADMIN_KEY<input id="auth-admin-key" type="password" autocomplete="off" placeholder="Nhập khóa admin"></label>
         </div>
         <div id="auth-msg" class="small" style="min-height:1.2rem;margin-bottom:.5rem"></div>
         <button class="btn btn-primary" id="auth-submit">Đăng nhập</button>

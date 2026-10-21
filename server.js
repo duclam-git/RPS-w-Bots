@@ -11,7 +11,7 @@ const engine = require('./engine');
 const matchplay = require('./matchplay');
 const runner = require('./runner');
 const auth = require('./auth');
-const { saveMatch } = require('./db');
+const { db, saveMatch } = require('./db');
 const tournament = require('./tournament');
 const api = require('./api');
 
@@ -25,7 +25,7 @@ app.use('/api', auth.sameOriginOnly);     // CSRF guard for state-changing API c
 // (which contains submitted bot source code), server code and temp bot files - never serve those.
 const PUBLIC_FILES = new Set([
     'index.html', 'style.css', 'logic.js', 'bots.js', 'bot_templates.js', 'elo.js',
-    'arena.html', 'arena.css', 'arena.js'
+    'arena.html', 'arena.css', 'arena.js', 'auth-gate.js'
 ]);
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.use((req, res, next) => {
@@ -119,6 +119,24 @@ const rules = engine.resolveRules();
 
 // Room Management
 const rooms = new Map();
+
+// Admin overview combines persisted totals with live game state held in memory.
+app.get('/api/admin/overview', auth.requireAdmin, (req, res) => {
+    const users = db.prepare('SELECT COUNT(*) AS total FROM users').get().total;
+    const tournaments = db.prepare(`
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN status IN ('registration', 'running') THEN 1 ELSE 0 END) AS open
+        FROM tournaments
+    `).get();
+    const submissions = db.prepare('SELECT COUNT(*) AS total FROM entries WHERE user_id IS NOT NULL').get().total;
+    const onlineMatches = [...rooms.values()].filter(room => room.gameActive).length;
+    res.json({
+        users,
+        tournaments: { open: tournaments.open || 0, total: tournaments.total },
+        submissions,
+        matches: onlineMatches + tournament.liveGameCount()
+    });
+});
 
 function generateRoomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -508,6 +526,6 @@ server.listen(PORT, () => {
     console.log(`🏆 Giải đấu & lịch sử trận:  http://localhost:${PORT}/arena.html`);
     if (auth.ADMIN_KEY_IS_GENERATED) {
         console.log(`🔑 ADMIN_KEY (tự sinh, đổi mỗi lần chạy): ${auth.ADMIN_KEY}`);
-        console.log('   Đặt biến môi trường ADMIN_KEY để dùng khóa cố định. Đăng nhập rồi dùng khóa này một lần để nhận quyền admin.');
+        console.log('   Đặt biến môi trường ADMIN_KEY để giữ khóa ổn định. Tài khoản có role admin cần khóa này mỗi lần đăng nhập.');
     }
 });
