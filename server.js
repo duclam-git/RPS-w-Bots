@@ -26,7 +26,6 @@ app.post('/api/run-bot-move', async (req, res) => {
             return res.json({ success: false, error: prep.error });
         }
         const result = await runner.executeBotMove(prep.botHandler, state, 2500);
-        runner.cleanupBot(prep.botHandler);
         res.json({ success: true, ...result });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });

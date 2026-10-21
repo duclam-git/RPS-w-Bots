@@ -4,25 +4,54 @@
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const TEMP_DIR = path.join(__dirname, 'temp_bots');
 if (!fs.existsSync(TEMP_DIR)) {
     fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
+// In-memory cache for compiled C++ binaries and prepared bot scripts
+const botCompileCache = new Map();
+
+function computeBotHash(lang, code) {
+    return crypto.createHash('md5').update(`${lang}:${code}`).digest('hex').slice(0, 16);
+}
+
 /**
  * Prepares and compiles/verifies a bot before match begins.
+ * Uses hash caching to avoid recompiling C++ on every single move.
  * @param {string} playerId Unique identifier
  * @param {string} lang 'javascript' | 'python' | 'cpp'
  * @param {string} code Source code string
  * @returns {Promise<{ success: boolean, error?: string, botHandler?: object }>}
  */
 async function prepareBot(playerId, lang, code) {
-    const safeId = playerId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const hash = computeBotHash(lang, code);
+    const cachedHandler = botCompileCache.get(hash);
+
+    if (cachedHandler) {
+        if (lang === 'cpp' && fs.existsSync(cachedHandler.exePath)) {
+            return { success: true, botHandler: cachedHandler };
+        }
+        if ((lang === 'python' || lang === 'javascript') && fs.existsSync(cachedHandler.scriptPath)) {
+            return { success: true, botHandler: cachedHandler };
+        }
+    }
+
+    const safeId = `${playerId.replace(/[^a-zA-Z0-9_-]/g, '_')}_${hash}`;
 
     if (lang === 'cpp') {
         const srcPath = path.join(TEMP_DIR, `bot_${safeId}.cpp`);
         const exePath = path.join(TEMP_DIR, `bot_${safeId}.exe`);
+
+        // If executable already exists from a previous process run
+        if (fs.existsSync(exePath)) {
+            const handler = { lang: 'cpp', exePath, srcPath, isCached: true };
+            botCompileCache.set(hash, handler);
+            return { success: true, botHandler: handler };
+        }
+
         fs.writeFileSync(srcPath, code, 'utf-8');
 
         // Compile with g++
@@ -35,13 +64,11 @@ async function prepareBot(playerId, lang, code) {
                         error: `Lỗi biên dịch C++:\n${stderr || stdout || error.message}`
                     });
                 } else {
+                    const handler = { lang: 'cpp', exePath, srcPath, isCached: true };
+                    botCompileCache.set(hash, handler);
                     resolve({
                         success: true,
-                        botHandler: {
-                            lang: 'cpp',
-                            exePath,
-                            srcPath
-                        }
+                        botHandler: handler
                     });
                 }
             });
@@ -50,13 +77,18 @@ async function prepareBot(playerId, lang, code) {
 
     if (lang === 'python') {
         const scriptPath = path.join(TEMP_DIR, `bot_${safeId}.py`);
-        fs.writeFileSync(scriptPath, code, 'utf-8');
+        if (!fs.existsSync(scriptPath)) {
+            fs.writeFileSync(scriptPath, code, 'utf-8');
+        }
+        const handler = {
+            lang: 'python',
+            scriptPath,
+            isCached: true
+        };
+        botCompileCache.set(hash, handler);
         return {
             success: true,
-            botHandler: {
-                lang: 'python',
-                scriptPath
-            }
+            botHandler: handler
         };
     }
 
@@ -91,13 +123,18 @@ try {
 }
 `;
         const scriptPath = path.join(TEMP_DIR, `bot_${safeId}.js`);
-        fs.writeFileSync(scriptPath, wrapperCode, 'utf-8');
+        if (!fs.existsSync(scriptPath)) {
+            fs.writeFileSync(scriptPath, wrapperCode, 'utf-8');
+        }
+        const handler = {
+            lang: 'javascript',
+            scriptPath,
+            isCached: true
+        };
+        botCompileCache.set(hash, handler);
         return {
             success: true,
-            botHandler: {
-                lang: 'javascript',
-                scriptPath
-            }
+            botHandler: handler
         };
     }
 
@@ -231,6 +268,7 @@ function executeBotMove(botHandler, state, timeoutMs = 2500) {
 
 function cleanupBot(botHandler) {
     try {
+        if (!botHandler || botHandler.isCached) return;
         if (botHandler.exePath && fs.existsSync(botHandler.exePath)) fs.unlinkSync(botHandler.exePath);
         if (botHandler.srcPath && fs.existsSync(botHandler.srcPath)) fs.unlinkSync(botHandler.srcPath);
         if (botHandler.scriptPath && fs.existsSync(botHandler.scriptPath)) fs.unlinkSync(botHandler.scriptPath);

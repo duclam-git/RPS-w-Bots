@@ -448,18 +448,21 @@
 
     function getBotCode(player) {
         const ctrl = player === 1 ? controllers.blue : controllers.red;
+        const currentLang = player === 1 ? blueLang : redLang;
         if (ctrl === 'custom') {
             if (player === 1) {
-                return editorBlue ? editorBlue.getValue() : localStorage.getItem('ott_bot_code_blue') || window.BOT_PRESETS.starterBlue;
+                return editorBlue ? editorBlue.getValue() : (localStorage.getItem(`ott_bot_code_blue_${currentLang}`) || getStarterCodeForLang(1, currentLang));
             } else {
-                return editorRed ? editorRed.getValue() : localStorage.getItem('ott_bot_code_red') || window.BOT_PRESETS.starterRed;
+                return editorRed ? editorRed.getValue() : (localStorage.getItem(`ott_bot_code_red_${currentLang}`) || getStarterCodeForLang(2, currentLang));
             }
         }
         // Built-in presets
+        const presetCode = getTemplateCodeForLang(player, currentLang, ctrl);
+        if (presetCode) return presetCode;
         if (window.BOT_PRESETS && window.BOT_PRESETS[ctrl]) {
             return window.BOT_PRESETS[ctrl];
         }
-        return window.BOT_PRESETS.random;
+        return getStarterCodeForLang(player, currentLang);
     }
 
     async function executeBot(player) {
@@ -669,7 +672,7 @@
         // Apply to board
         board[dr][dc] = board[sr][sc];
         board[sr][sc] = null;
-        lastMove = { fromR: sr, fromC: sc, toR: dr, toC: dc };
+        lastMove = { fromR: sr, fromC: sc, toR: dr, toC: dc, isCapture };
         selectedPiece = null;
 
         // UI Refresh
@@ -700,9 +703,10 @@
 
     // ===== Battle Loop Controls =====
 
+    let isStepping = false;
+
     async function stepBattle() {
-        if (gameOver) {
-            pauseBattle();
+        if (gameOver || !isRunning || isPaused || isStepping) {
             return;
         }
 
@@ -713,19 +717,34 @@
             return;
         }
 
-        // Bot turn
-        updateStatusTicker(`${currentPlayer === 1 ? 'Đội Xanh' : 'Đội Đỏ'} đang tính toán nước đi...`);
-        const move = await executeBot(currentPlayer);
-        if (move) {
-            executeMove(move.from.r, move.from.c, move.to.r, move.to.c);
+        isStepping = true;
+        try {
+            // Bot turn
+            updateStatusTicker(`${currentPlayer === 1 ? 'Đội Xanh' : 'Đội Đỏ'} đang tính toán nước đi...`);
+            const move = await executeBot(currentPlayer);
+
+            if (!isRunning || isPaused || gameOver) {
+                return;
+            }
+
+            if (move) {
+                executeMove(move.from.r, move.from.c, move.to.r, move.to.c);
+                // Synchronize with the browser paint cycle to ensure every single move is drawn
+                await new Promise(resolve => requestAnimationFrame(resolve));
+            }
+        } catch (err) {
+            console.error("Lỗi bước đấu bot:", err);
+        } finally {
+            isStepping = false;
         }
 
-        // If auto-running and match not over, schedule next step
+        // If auto-running and match not over, schedule next step with calibrated delay
         if (isRunning && !isPaused && !gameOver) {
             clearTimeout(stepTimer);
+            const delay = Math.max(battleSpeed, 15);
             stepTimer = setTimeout(() => {
                 stepBattle();
-            }, battleSpeed);
+            }, delay);
         }
     }
 
@@ -736,20 +755,26 @@
         isRunning = true;
         isPaused = false;
         updateBattleButtons();
+        clearTimeout(stepTimer);
+        stepTimer = null;
         stepBattle();
     }
 
     function pauseBattle() {
         isRunning = false;
         isPaused = true;
+        isStepping = false;
         clearTimeout(stepTimer);
+        stepTimer = null;
         updateBattleButtons();
         updateStatusTicker("Đã tạm dừng trận đấu");
     }
 
     function resetBattle() {
         pauseBattle();
+        isStepping = false;
         clearTimeout(stepTimer);
+        stepTimer = null;
 
         initBoard();
         currentPlayer = 1;
@@ -843,16 +868,19 @@
 
     // ===== UI Rendering =====
 
-    function drawBoard() {
+    let boardCellsDOM = null;
+
+    function initBoardDOM() {
         const boardEl = document.getElementById('board');
-        if (!boardEl) return;
+        if (!boardEl) return null;
         boardEl.innerHTML = '';
+        boardCellsDOM = [];
 
         for (let r = 0; r < ROWS; r++) {
+            boardCellsDOM[r] = [];
             for (let c = 0; c < COLS; c++) {
                 const cell = document.createElement('div');
-                cell.classList.add('cell');
-                cell.classList.add((r + c) % 2 === 0 ? 'cell-light' : 'cell-dark');
+                cell.className = `cell ${(r + c) % 2 === 0 ? 'cell-light' : 'cell-dark'}`;
                 cell.dataset.r = r;
                 cell.dataset.c = c;
 
@@ -873,50 +901,93 @@
                     cell.title = `Đích Đội Đỏ (${notation}) — Về đây để thắng!`;
                 }
 
+                cell.addEventListener('click', () => handleCellClick(r, c));
+                boardEl.appendChild(cell);
+                boardCellsDOM[r][c] = cell;
+            }
+        }
+        return boardCellsDOM;
+    }
+
+    function drawBoard() {
+        const boardEl = document.getElementById('board');
+        if (!boardEl) return;
+
+        if (!boardCellsDOM || boardEl.children.length !== ROWS * COLS) {
+            initBoardDOM();
+        }
+
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const cell = boardCellsDOM[r][c];
+
+                // Build class list
+                let classList = `cell ${(r + c) % 2 === 0 ? 'cell-light' : 'cell-dark'}`;
+                if (c === COLS - 1) classList += ' last-col';
+                if (r === ROWS - 1) classList += ' last-row';
+                if (r === BLUE_GOAL.r && c === BLUE_GOAL.c) classList += ' goal-blue';
+                if (r === RED_GOAL.r && c === RED_GOAL.c) classList += ' goal-red';
+
                 // Selected highlight
                 if (selectedPiece && selectedPiece.r === r && selectedPiece.c === c) {
-                    cell.classList.add('selected');
+                    classList += ' selected';
                 }
 
                 // Last move highlights
                 if (lastMove) {
-                    if (lastMove.fromR === r && lastMove.fromC === c) cell.classList.add('last-move-from');
-                    if (lastMove.toR === r && lastMove.toC === c) cell.classList.add('last-move-to');
-                }
-
-                // Valid move indicator for human player
-                if (selectedPiece && isValidMove(selectedPiece.r, selectedPiece.c, r, c)) {
-                    const target = board[r][c];
-                    if (target && target.player !== board[selectedPiece.r][selectedPiece.c].player) {
-                        cell.classList.add('capturable');
-                    } else if (!target) {
-                        cell.classList.add('valid-move');
+                    if (lastMove.fromR === r && lastMove.fromC === c) {
+                        classList += ' last-move-from';
+                    }
+                    if (lastMove.toR === r && lastMove.toC === c) {
+                        classList += ' last-move-to';
+                        if (lastMove.isCapture) classList += ' was-capture';
                     }
                 }
 
-                // Piece
+                // Valid move indicator for human player
+                let hasMoveDot = false;
+                if (selectedPiece && isValidMove(selectedPiece.r, selectedPiece.c, r, c)) {
+                    const target = board[r][c];
+                    if (target && target.player !== board[selectedPiece.r][selectedPiece.c].player) {
+                        classList += ' capturable';
+                    } else if (!target) {
+                        classList += ' valid-move';
+                        hasMoveDot = true;
+                    }
+                }
+
+                if (cell.className !== classList) {
+                    cell.className = classList;
+                }
+
+                // Piece DOM management (preserve unchanged pieces)
                 const piece = board[r][c];
-                if (piece) {
-                    const pieceDiv = document.createElement('div');
-                    pieceDiv.classList.add('piece', piece.player === 1 ? 'piece-blue' : 'piece-red', piece.type);
+                const pieceKey = piece ? `${piece.player}_${piece.type}` : '';
+                const currentKey = cell.dataset.pieceKey || '';
 
-                    const iconDiv = document.createElement('div');
-                    iconDiv.classList.add('piece-icon');
-                    iconDiv.innerHTML = PIECE_SVG[piece.type];
-                    pieceDiv.appendChild(iconDiv);
-
-                    cell.appendChild(pieceDiv);
+                if (pieceKey !== currentKey) {
+                    cell.innerHTML = '';
+                    if (piece) {
+                        const pieceDiv = document.createElement('div');
+                        pieceDiv.className = `piece ${piece.player === 1 ? 'piece-blue' : 'piece-red'} ${piece.type}`;
+                        const iconDiv = document.createElement('div');
+                        iconDiv.className = 'piece-icon';
+                        iconDiv.innerHTML = PIECE_SVG[piece.type];
+                        pieceDiv.appendChild(iconDiv);
+                        cell.appendChild(pieceDiv);
+                    }
+                    cell.dataset.pieceKey = pieceKey;
                 }
 
-                // Move dot
-                if (!piece && selectedPiece && isValidMove(selectedPiece.r, selectedPiece.c, r, c)) {
+                // Move dot management
+                const existingDot = cell.querySelector('.move-dot');
+                if (hasMoveDot && !existingDot) {
                     const dot = document.createElement('div');
-                    dot.classList.add('move-dot');
+                    dot.className = 'move-dot';
                     cell.appendChild(dot);
+                } else if (!hasMoveDot && existingDot) {
+                    existingDot.remove();
                 }
-
-                cell.addEventListener('click', () => handleCellClick(r, c));
-                boardEl.appendChild(cell);
             }
         }
     }
@@ -1340,14 +1411,45 @@
         cpp: 'ace/mode/c_cpp'
     };
 
+    function getStarterCodeForLang(player, lang) {
+        lang = lang || (player === 1 ? blueLang : redLang) || 'javascript';
+        if (window.MULTI_LANG_TEMPLATES && window.MULTI_LANG_TEMPLATES[lang]) {
+            const t = window.MULTI_LANG_TEMPLATES[lang];
+            const code = player === 1 ? (t.starterBlue || t.blue) : (t.starterRed || t.red);
+            if (code) return code;
+        }
+        if (window.BOT_PRESETS) {
+            return player === 1 ? window.BOT_PRESETS.starterBlue : window.BOT_PRESETS.starterRed;
+        }
+        return '';
+    }
+
+    function getTemplateCodeForLang(player, lang, key) {
+        lang = lang || (player === 1 ? blueLang : redLang) || 'javascript';
+        if (window.MULTI_LANG_TEMPLATES && window.MULTI_LANG_TEMPLATES[lang]) {
+            const t = window.MULTI_LANG_TEMPLATES[lang];
+            if (t[key]) return t[key];
+            if (key === 'starterBlue' && (t.starterBlue || t.blue)) return t.starterBlue || t.blue;
+            if (key === 'starterRed' && (t.starterRed || t.red)) return t.starterRed || t.red;
+            if (key === 'starter') return player === 1 ? (t.starterBlue || t.blue) : (t.starterRed || t.red);
+        }
+        if (window.BOT_PRESETS && window.BOT_PRESETS[key]) {
+            return window.BOT_PRESETS[key];
+        }
+        return getStarterCodeForLang(player, lang);
+    }
+
     function getDefaultCodeForLang(player, lang) {
         const key = `ott_bot_code_${player === 1 ? 'blue' : 'red'}_${lang}`;
         const saved = localStorage.getItem(key);
-        if (saved) return saved;
-        if (window.MULTI_LANG_TEMPLATES && window.MULTI_LANG_TEMPLATES[lang]) {
-            return player === 1 ? window.MULTI_LANG_TEMPLATES[lang].blue : window.MULTI_LANG_TEMPLATES[lang].red;
+        if (saved) {
+            // Guard: If corrupted JS was saved into python/cpp editor from prior bug, discard it
+            if ((lang === 'python' || lang === 'cpp') && saved.includes('function getNextMove')) {
+                return getStarterCodeForLang(player, lang);
+            }
+            return saved;
         }
-        return window.BOT_PRESETS.random;
+        return getStarterCodeForLang(player, lang);
     }
 
     function initAceEditors() {
@@ -1411,6 +1513,8 @@
                 else if (lang === 'cpp') hint.innerHTML = 'Lập trình bot C++17 cho Đội Xanh (nhận state JSON qua <code>cin</code>, in nước đi ra <code>cout</code>)';
                 else hint.innerHTML = 'Lập trình hàm <code>getNextMove(state, helpers, log)</code> cho Đội Xanh';
             }
+            const tSel = document.getElementById('template-select-blue');
+            if (tSel) tSel.value = "";
         } else {
             redLang = lang;
             localStorage.setItem('ott_red_lang', lang);
@@ -1427,6 +1531,8 @@
                 else if (lang === 'cpp') hint.innerHTML = 'Lập trình bot C++17 cho Đội Đỏ (nhận state JSON qua <code>cin</code>, in nước đi ra <code>cout</code>)';
                 else hint.innerHTML = 'Lập trình hàm <code>getNextMove(state, helpers, log)</code> cho Đội Đỏ';
             }
+            const tSel = document.getElementById('template-select-red');
+            if (tSel) tSel.value = "";
         }
     }
 
@@ -1716,7 +1822,7 @@
                 turnCount = data.turnCount;
                 capturedByBlue = data.capturedByBlue;
                 capturedByRed = data.capturedByRed;
-                lastMove = { fromR: m.from.r, fromC: m.from.c, toR: m.to.r, toC: m.to.c };
+                lastMove = { fromR: m.from.r, fromC: m.from.c, toR: m.to.r, toC: m.to.c, isCapture: !!m.capture };
                 drawBoard();
                 updateTurnIndicator();
                 updateMaterialPanels();
@@ -2075,6 +2181,10 @@
         if (speedSel) {
             speedSel.addEventListener('change', (e) => {
                 battleSpeed = parseInt(e.target.value, 10);
+                if (isRunning && !isPaused && !gameOver && stepTimer && !isStepping) {
+                    clearTimeout(stepTimer);
+                    stepTimer = setTimeout(stepBattle, Math.max(Math.min(battleSpeed, 30), 10));
+                }
             });
         }
 
@@ -2152,14 +2262,16 @@
             });
         });
 
-        // Template Loaders
+        // Template Loaders (Multi-Language Aware)
         const blueTemplateSel = document.getElementById('template-select-blue');
         if (blueTemplateSel) {
             blueTemplateSel.addEventListener('change', (e) => {
                 const key = e.target.value;
-                if (key && window.BOT_PRESETS && window.BOT_PRESETS[key]) {
-                    if (confirm("Tải mẫu bot này vào khung code Đội Xanh? Code hiện tại sẽ được thay thế.")) {
-                        setEditorCode(1, window.BOT_PRESETS[key]);
+                const lang = blueLang || 'javascript';
+                const code = getTemplateCodeForLang(1, lang, key);
+                if (key && code) {
+                    if (confirm(`Tải mẫu bot (${lang.toUpperCase()}) vào khung code Đội Xanh? Code hiện tại sẽ được thay thế.`)) {
+                        setEditorCode(1, code);
                     }
                 }
                 blueTemplateSel.value = "";
@@ -2170,9 +2282,11 @@
         if (redTemplateSel) {
             redTemplateSel.addEventListener('change', (e) => {
                 const key = e.target.value;
-                if (key && window.BOT_PRESETS && window.BOT_PRESETS[key]) {
-                    if (confirm("Tải mẫu bot này vào khung code Đội Đỏ? Code hiện tại sẽ được thay thế.")) {
-                        setEditorCode(2, window.BOT_PRESETS[key]);
+                const lang = redLang || 'javascript';
+                const code = getTemplateCodeForLang(2, lang, key);
+                if (key && code) {
+                    if (confirm(`Tải mẫu bot (${lang.toUpperCase()}) vào khung code Đội Đỏ? Code hiện tại sẽ được thay thế.`)) {
+                        setEditorCode(2, code);
                     }
                 }
                 redTemplateSel.value = "";
@@ -2195,20 +2309,24 @@
             });
         }
 
-        // Reset Template Buttons
+        // Reset Template Buttons (Multi-Language Aware)
         const resetBlue = document.getElementById('reset-blue-btn');
         if (resetBlue) {
             resetBlue.addEventListener('click', () => {
-                if (confirm("Khôi phục code Đội Xanh về mẫu mặc định?")) {
-                    setEditorCode(1, window.BOT_PRESETS.starterBlue);
+                const lang = blueLang || 'javascript';
+                if (confirm(`Khôi phục code Đội Xanh về mẫu gốc (${lang.toUpperCase()})?`)) {
+                    const starterCode = getStarterCodeForLang(1, lang);
+                    setEditorCode(1, starterCode);
                 }
             });
         }
         const resetRed = document.getElementById('reset-red-btn');
         if (resetRed) {
             resetRed.addEventListener('click', () => {
-                if (confirm("Khôi phục code Đội Đỏ về mẫu mặc định?")) {
-                    setEditorCode(2, window.BOT_PRESETS.starterRed);
+                const lang = redLang || 'javascript';
+                if (confirm(`Khôi phục code Đội Đỏ về mẫu gốc (${lang.toUpperCase()})?`)) {
+                    const starterCode = getStarterCodeForLang(2, lang);
+                    setEditorCode(2, starterCode);
                 }
             });
         }

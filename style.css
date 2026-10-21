@@ -590,11 +590,56 @@ body {
 }
 
 .cell.last-move-from {
-    background-color: #fef9c3 !important;
+    background-color: rgba(254, 240, 138, 0.75) !important;
+    outline: 2px dashed #b45309 !important;
+    outline-offset: -2px;
+    z-index: 2;
 }
 
 .cell.last-move-to {
-    background-color: #fde047 !important;
+    background-color: rgba(250, 204, 21, 0.85) !important;
+    outline: 3px solid #b45309 !important;
+    outline-offset: -3px;
+    box-shadow: inset 0 0 10px rgba(202, 138, 4, 0.5) !important;
+    z-index: 3;
+}
+
+/* Animations for clear move visibility */
+@keyframes pieceArrive {
+    0% {
+        transform: scale(0.65);
+        filter: brightness(1.3);
+    }
+    55% {
+        transform: scale(1.15);
+    }
+    100% {
+        transform: scale(1);
+        filter: brightness(1);
+    }
+}
+
+.cell.last-move-to .piece {
+    animation: pieceArrive 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes captureBurst {
+    0% {
+        transform: scale(0.7);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.9);
+    }
+    50% {
+        transform: scale(1.22);
+        box-shadow: 0 0 0 12px rgba(239, 68, 68, 0);
+    }
+    100% {
+        transform: scale(1);
+        box-shadow: 2px 2px 0 var(--theme-border);
+    }
+}
+
+.cell.last-move-to.was-capture .piece {
+    animation: captureBurst 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .cell.valid-move {
@@ -1325,11 +1370,18 @@ body {
 }
 
 [data-theme="dark"] .cell.last-move-from {
-    background-color: #3b2f15 !important;
+    background-color: rgba(180, 83, 9, 0.45) !important;
+    outline: 2px dashed #f59e0b !important;
+    outline-offset: -2px;
+    z-index: 2;
 }
 
 [data-theme="dark"] .cell.last-move-to {
-    background-color: #4d380e !important;
+    background-color: rgba(234, 179, 8, 0.5) !important;
+    outline: 3px solid #facc15 !important;
+    outline-offset: -3px;
+    box-shadow: inset 0 0 12px rgba(250, 204, 21, 0.4) !important;
+    z-index: 3;
 }
 
 [data-theme="dark"] .cell.valid-move {
