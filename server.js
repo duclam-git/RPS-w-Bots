@@ -1,5 +1,7 @@
 // ===== OTTv2 Code Arena - Realtime Multiplayer, Tournaments & Multi-Language Server =====
 
+require('./loadenv').load();          // optional .env file (see .env.example)
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -11,12 +13,19 @@ const engine = require('./engine');
 const matchplay = require('./matchplay');
 const runner = require('./runner');
 const auth = require('./auth');
-const { db, saveMatch } = require('./db');
+const guard = require('./netguard');
+const { saveMatch } = require('./db');
 const tournament = require('./tournament');
+const backup = require('./backup');
+const { db } = require('./db');
 const api = require('./api');
 
 const app = express();
-app.use(cors());
+app.disable('x-powered-by');
+// Behind nginx/Caddy set TRUST_PROXY=1 so rate limits see the real client IP (never trust X-Forwarded-For otherwise)
+app.set('trust proxy', guard.trustProxyHops());
+app.use(guard.securityHeaders);
+app.use(cors(guard.corsOptions()));       // no CORS headers unless ALLOWED_ORIGINS lists the origin
 app.use(express.json({ limit: '2mb' }));
 app.use(auth.attachUser);                 // req.user = logged-in account (or null)
 app.use('/api', auth.sameOriginOnly);     // CSRF guard for state-changing API calls
@@ -42,6 +51,16 @@ app.get('/vendor/ace/:file', (req, res) => {
     if (!ACE_FILES.test(req.params.file)) return res.status(404).end();
     res.set('Cache-Control', 'public, max-age=604800');
     res.sendFile(path.join(ACE_DIR, req.params.file));
+});
+
+// Liveness / readiness probe for load balancers, Docker, systemd, uptime monitors (no secrets in it)
+app.get('/healthz', (req, res) => {
+    try {
+        db.prepare('SELECT 1').get();
+        res.set('Cache-Control', 'no-store').json({ ok: true, uptime: Math.round(process.uptime()) });
+    } catch (err) {
+        res.status(503).json({ ok: false });
+    }
 });
 
 // Match history + tournaments REST API
@@ -109,7 +128,10 @@ app.post('/api/run-bot-move', localRunLimiter, async (req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: '*' }
+    maxHttpBufferSize: 256 * 1024,                       // code is capped at 100KB; nothing legitimate is bigger
+    // Cookies are now a credential, so a hostile web page must not be able to open a WebSocket to us
+    // with the visitor's session (cross-site WebSocket hijacking): same-origin or ALLOWED_ORIGINS only.
+    allowRequest: (req, cb) => cb(null, guard.originAllowed(req))
 });
 
 const PORT = process.env.PORT || 3000;
@@ -117,7 +139,7 @@ const PORT = process.env.PORT || 3000;
 // Game rules live in engine.js (shared by online rooms, tournaments and replay validation).
 const rules = engine.resolveRules();
 
-// Room Management
+// ===== Online rooms =====
 const rooms = new Map();
 
 // Admin overview combines persisted totals with live game state held in memory.
@@ -130,20 +152,19 @@ app.get('/api/admin/overview', auth.requireAdmin, (req, res) => {
     `).get();
     const submissions = db.prepare('SELECT COUNT(*) AS total FROM entries WHERE user_id IS NOT NULL').get().total;
     const onlineMatches = [...rooms.values()].filter(room => room.gameActive).length;
-    res.json({
-        users,
-        tournaments: { open: tournaments.open || 0, total: tournaments.total },
-        submissions,
-        matches: onlineMatches + tournament.liveGameCount()
-    });
+    res.json({ users, tournaments: { open: tournaments.open || 0, total: tournaments.total }, submissions,
+        matches: onlineMatches + tournament.liveGameCount() });
 });
+
+const MAX_ROOMS = parseInt(process.env.MAX_ROOMS, 10) || 200;
+const MAX_ROOM_CODE_BYTES = 100 * 1024;
+const LANGS = ['javascript', 'python', 'cpp'];
+const normLang = (l, d) => (LANGS.includes(l) ? l : d);
 
 function generateRoomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = 'OTT-';
-    for (let i = 0; i < 4; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+    for (let i = 0; i < 4; i++) code += chars.charAt(crypto.randomInt(chars.length));
     return code;
 }
 
@@ -157,224 +178,254 @@ io.use((socket, next) => {
 function seatName(socket, requested, fallback) {
     const user = socket.data.user;
     if (user) return user.username;
-    const name = String(requested || fallback).trim().slice(0, 24) || fallback;
+    const name = guard.str(requested, 24, '') || fallback;
     const taken = auth.leaderboard().some(p => p.name.toLowerCase() === name.toLowerCase());
     return taken ? `${name} (khách)` : name;
 }
 
+const eventLimiter = guard.createEventLimiter();
+
+function cleanupRoomBots(room) {
+    for (const seat of [room.blue, room.red]) {
+        if (seat && seat.handler) { runner.cleanupBot(seat.handler); seat.handler = null; }
+    }
+}
+
+function newSeat(socket, name, fallback, lang, defaultLang) {
+    return {
+        socketId: socket.id,
+        name: seatName(socket, name, fallback),
+        userId: socket.data.user ? socket.data.user.id : null,
+        lang: normLang(lang, defaultLang),
+        code: '',
+        ready: false,
+        handler: null
+    };
+}
+
 io.on('connection', (socket) => {
-    // Send current leaderboard
+    const ip = guard.socketIp(socket);
+    socket.data.ip = ip;
+
+    // One IP cannot hold hundreds of sockets
+    if (!guard.connections.acquire(ip)) {
+        socket.emit('join_error', 'Quá nhiều kết nối từ địa chỉ của bạn.');
+        return socket.disconnect(true);
+    }
+    socket.once('disconnect', () => { guard.connections.release(ip); eventLimiter.forget(socket.id); });
+
+    // Flood control: drop (and tell the client) instead of doing work
+    socket.use((packet, next) => {
+        if (eventLimiter.allow(socket.id, ip, packet[0])) return next();
+        socket.emit('rate_limited', { event: String(packet[0]).slice(0, 40) });
+    });
+
+    /**
+     * Registers a handler that can NEVER take the process down: the payload is coerced to a plain
+     * object (a bare `emit('x')` or `emit('x', null)` used to crash the server on destructuring) and
+     * every sync/async error is caught.
+     */
+    const on = (event, fn, { raw = false } = {}) => socket.on(event, async (payload) => {
+        try { await fn(raw ? payload : guard.obj(payload)); }
+        catch (err) {
+            console.error(`[socket ${event}]`, err);
+            socket.emit('server_error', { event });
+        }
+    });
+
     socket.emit('leaderboard_data', auth.leaderboard());
 
     // Tournament spectating: join the tournament's room to receive bracket updates + live games
-    socket.on('watch_tournament', (tid) => {
+    on('watch_tournament', (tid) => {
         const id = parseInt(tid, 10);
         if (!Number.isInteger(id)) return;
         socket.join(`t:${id}`);
         socket.emit('live_snapshot', { tournamentId: id, games: tournament.liveForTournament(id) });
-    });
-    socket.on('unwatch_tournament', (tid) => {
+    }, { raw: true });
+    on('unwatch_tournament', (tid) => {
         const id = parseInt(tid, 10);
         if (Number.isInteger(id)) socket.leave(`t:${id}`);
-    });
+    }, { raw: true });
 
     // 1. Create Room
-    socket.on('create_room', ({ playerName, lang }) => {
-        let roomCode = generateRoomCode();
-        while (rooms.has(roomCode)) {
-            roomCode = generateRoomCode();
-        }
+    on('create_room', ({ playerName, lang }) => {
+        if (socket.roomCode) handleUserLeave(socket);                 // one room at a time
+        if (rooms.size >= MAX_ROOMS) return socket.emit('join_error', 'Máy chủ đang có quá nhiều phòng, hãy thử lại sau ít phút.');
+        let roomCode;
+        do { roomCode = generateRoomCode(); } while (rooms.has(roomCode));
 
         const room = {
             code: roomCode,
             hostId: socket.id,
-            blue: {
-                socketId: socket.id,
-                name: seatName(socket, playerName, 'Người chơi 1'),
-                userId: socket.data.user ? socket.data.user.id : null,
-                lang: lang || 'javascript',
-                code: '',
-                ready: false,
-                handler: null
-            },
+            phase: 'lobby',                 // lobby -> preparing -> countdown -> playing -> lobby
+            blue: newSeat(socket, playerName, 'Người chơi 1', lang, 'javascript'),
             red: null,
             spectators: [],
             gameActive: false,
             board: null,
-            currentPlayer: 1,
-            turnCount: 1,
             moveHistory: [],
-            capturedByBlue: [],
-            capturedByRed: [],
-            signal: null
+            signal: null,
+            startTimer: null
         };
-
         rooms.set(roomCode, room);
         socket.join(roomCode);
         socket.roomCode = roomCode;
-
-        socket.emit('room_created', {
-            roomCode,
-            slot: 'blue',
-            roomState: getRoomPublicState(room)
-        });
+        socket.emit('room_created', { roomCode, slot: 'blue', roomState: getRoomPublicState(room) });
     });
 
     // 2. Join Room
-    socket.on('join_room', ({ roomCode, playerName, lang }) => {
-        const cleanCode = (roomCode || '').trim().toUpperCase();
+    on('join_room', ({ roomCode, playerName, lang }) => {
+        const cleanCode = guard.str(roomCode, 12).toUpperCase();
         const room = rooms.get(cleanCode);
-
-        if (!room) {
-            return socket.emit('join_error', 'Mã phòng không tồn tại hoặc phòng đã đóng.');
-        }
-
-        if (room.gameActive) {
-            return socket.emit('join_error', 'Trận đấu trong phòng này đang diễn ra!');
-        }
+        if (!room) return socket.emit('join_error', 'Mã phòng không tồn tại hoặc phòng đã đóng.');
+        if (room.gameActive) return socket.emit('join_error', 'Trận đấu trong phòng này đang diễn ra!');
+        if (socket.roomCode === cleanCode) return;                    // already inside
+        if (socket.roomCode) handleUserLeave(socket);
 
         let slot = 'spectator';
         if (!room.red) {
             slot = 'red';
-            room.red = {
-                socketId: socket.id,
-                name: seatName(socket, playerName, 'Người chơi 2'),
-                userId: socket.data.user ? socket.data.user.id : null,
-                lang: lang || 'python',
-                code: '',
-                ready: false,
-                handler: null
-            };
+            room.red = newSeat(socket, playerName, 'Người chơi 2', lang, 'python');
+        } else if (!room.blue) {
+            slot = 'blue';
+            room.blue = newSeat(socket, playerName, 'Người chơi 1', lang, 'javascript');
         } else {
             room.spectators.push({ socketId: socket.id, name: seatName(socket, playerName, 'Khán giả') });
         }
-
         socket.join(cleanCode);
         socket.roomCode = cleanCode;
-
-        socket.emit('room_joined', {
-            roomCode: cleanCode,
-            slot,
-            roomState: getRoomPublicState(room)
-        });
-
+        socket.emit('room_joined', { roomCode: cleanCode, slot, roomState: getRoomPublicState(room) });
         io.to(cleanCode).emit('room_updated', getRoomPublicState(room));
     });
 
     // 3. Player Ready & Code Submission
-    socket.on('player_ready', async ({ code, lang, name }) => {
-        const roomCode = socket.roomCode;
-        if (!roomCode || !rooms.has(roomCode)) return;
-        const room = rooms.get(roomCode);
+    on('player_ready', async ({ code, lang, name }) => {
+        const room = rooms.get(socket.roomCode);
+        if (!room || room.phase !== 'lobby') return;                  // not while compiling / counting down / playing
+        const side = room.blue && room.blue.socketId === socket.id ? 'blue'
+            : room.red && room.red.socketId === socket.id ? 'red' : null;
+        if (!side) return;                                            // spectators cannot submit
+        const seat = room[side];
 
-        let isBlue = room.blue && room.blue.socketId === socket.id;
-        let isRed = room.red && room.red.socketId === socket.id;
-
-        if (isBlue) {
-            room.blue.code = code;
-            room.blue.lang = lang;
-            if (name && !room.blue.userId) room.blue.name = seatName(socket, name, room.blue.name);
-            room.blue.ready = true;
-            io.to(roomCode).emit('player_submitted', { player: 'blue', name: room.blue.name });
-        } else if (isRed) {
-            room.red.code = code;
-            room.red.lang = lang;
-            if (name && !room.red.userId) room.red.name = seatName(socket, name, room.red.name);
-            room.red.ready = true;
-            io.to(roomCode).emit('player_submitted', { player: 'red', name: room.red.name });
+        if (typeof code !== 'string' || !code.trim() || Buffer.byteLength(code, 'utf-8') > MAX_ROOM_CODE_BYTES) {
+            return socket.emit('match_code_error', { player: side, name: seat.name, error: 'Code trống hoặc quá lớn (tối đa 100KB).' });
         }
-
-        io.to(roomCode).emit('room_updated', getRoomPublicState(room));
+        seat.code = code;
+        seat.lang = normLang(lang, seat.lang);
+        if (name && !seat.userId) seat.name = seatName(socket, name, seat.name);
+        seat.ready = true;
+        io.to(room.code).emit('player_submitted', { player: side, name: seat.name });
+        io.to(room.code).emit('room_updated', getRoomPublicState(room));
 
         // ONLY when BOTH players have submitted code, begin compilation and battle
-        if (room.blue && room.blue.ready && room.red && room.red.ready && !room.gameActive) {
-            io.to(roomCode).emit('match_preparing', '⏳ Cả 2 người chơi đã nộp code! Đang kiểm tra cú pháp và biên dịch code...');
-
-            // Prepare Blue bot
-            const bluePrep = await runner.prepareBot(roomCode + '_blue', room.blue.lang, room.blue.code);
-            if (!bluePrep.success) {
-                room.blue.ready = false;
-                io.to(roomCode).emit('room_updated', getRoomPublicState(room));
-                return io.to(roomCode).emit('match_code_error', {
-                    player: 'blue',
-                    name: room.blue.name,
-                    error: bluePrep.error
-                });
-            }
-            room.blue.handler = bluePrep.botHandler;
-
-            // Prepare Red bot
-            const redPrep = await runner.prepareBot(roomCode + '_red', room.red.lang, room.red.code);
-            if (!redPrep.success) {
-                room.red.ready = false;
-                io.to(roomCode).emit('room_updated', getRoomPublicState(room));
-                return io.to(roomCode).emit('match_code_error', {
-                    player: 'red',
-                    name: room.red.name,
-                    error: redPrep.error
-                });
-            }
-            room.red.handler = redPrep.botHandler;
-
-            // Both bots compiled successfully! Notify countdown then start battle
-            io.to(roomCode).emit('match_validated', '✅ Code của cả 2 bên hợp lệ! Chuẩn bị thi đấu trong 3 giây...');
-            setTimeout(() => {
-                if (rooms.has(roomCode) && room.gameActive === false) {
-                    startOnlineMatch(room);
-                }
-            }, 2500);
-        }
+        if (room.blue && room.blue.ready && room.red && room.red.ready) await prepareAndStart(room);
     });
 
     // 4. Request Rematch (Reset submission state for new round)
-    socket.on('request_rematch', () => {
-        const roomCode = socket.roomCode;
-        if (!roomCode || !rooms.has(roomCode)) return;
-        const room = rooms.get(roomCode);
-
-        room.gameActive = false;
-        if (room.signal) room.signal.aborted = true;
-        if (room.blue) room.blue.ready = false;
-        if (room.red) room.red.ready = false;
-
-        io.to(roomCode).emit('room_updated', getRoomPublicState(room));
-        io.to(roomCode).emit('rematch_ready', 'Ván đấu mới sẵn sàng! Hãy chỉnh sửa code và bấm "Nộp Code" để thi đấu lại.');
+    on('request_rematch', () => {
+        const room = rooms.get(socket.roomCode);
+        if (!room) return;
+        resetRoom(room);
+        io.to(room.code).emit('room_updated', getRoomPublicState(room));
+        io.to(room.code).emit('rematch_ready', 'Ván đấu mới sẵn sàng! Hãy chỉnh sửa code và bấm "Nộp Code" để thi đấu lại.');
     });
 
     // 5. Leave Room
-    socket.on('leave_room', () => {
-        handleUserLeave(socket);
-    });
-
-    socket.on('disconnect', () => {
-        handleUserLeave(socket);
-    });
+    on('leave_room', () => handleUserLeave(socket));
+    socket.on('disconnect', () => { try { handleUserLeave(socket); } catch (err) { console.error('[disconnect]', err); } });
 });
+
+/** Back to the lobby: stop a running match / pending start, forget compiled bots and submissions. */
+function resetRoom(room) {
+    if (room.startTimer) { clearTimeout(room.startTimer); room.startTimer = null; }
+    if (room.signal) room.signal.aborted = true;
+    room.gameActive = false;
+    room.phase = 'lobby';
+    for (const seat of [room.blue, room.red]) if (seat) seat.ready = false;
+    cleanupRoomBots(room);
+}
+
+/** Compile both bots, then start the match after a short countdown. Safe against players leaving at any point. */
+async function prepareAndStart(room) {
+    if (room.phase !== 'lobby') return;                               // two submissions racing must start ONE match
+    room.phase = 'preparing';
+    const code = room.code;
+    io.to(code).emit('match_preparing', '⏳ Cả 2 người chơi đã nộp code! Đang kiểm tra cú pháp và biên dịch code...');
+
+    try {
+        for (const side of ['blue', 'red']) {
+            const seat = room[side];
+            if (!seat) return abandonPreparation(room);
+            const prep = await runner.prepareBot(`${code}_${side}`, seat.lang, seat.code);
+            // somebody may have left (or the room died) while we were compiling
+            if (rooms.get(code) !== room || !room.blue || !room.red || room.phase !== 'preparing') {
+                if (prep.success) runner.cleanupBot(prep.botHandler);
+                return abandonPreparation(room);
+            }
+            if (!prep.success) {
+                seat.ready = false;
+                room.phase = 'lobby';
+                cleanupRoomBots(room);
+                io.to(code).emit('room_updated', getRoomPublicState(room));
+                return io.to(code).emit('match_code_error', { player: side, name: seat.name, error: prep.error });
+            }
+            seat.handler = prep.botHandler;
+        }
+    } catch (err) {
+        console.error('[prepare]', err);
+        resetRoom(room);
+        io.to(code).emit('room_updated', getRoomPublicState(room));
+        return io.to(code).emit('match_error', 'Lỗi máy chủ khi chuẩn bị trận đấu. Hãy nộp lại code.');
+    }
+
+    io.to(code).emit('match_validated', '✅ Code của cả 2 bên hợp lệ! Chuẩn bị thi đấu trong 3 giây...');
+    room.phase = 'countdown';
+    room.startTimer = setTimeout(() => {
+        room.startTimer = null;
+        if (rooms.get(code) !== room || room.phase !== 'countdown' || !room.blue || !room.red) return abandonPreparation(room);
+        startOnlineMatch(room).catch(err => {
+            console.error('[match]', err);
+            resetRoom(room);
+            io.to(code).emit('room_updated', getRoomPublicState(room));
+            io.to(code).emit('match_error', 'Lỗi máy chủ trong trận đấu.');
+        });
+    }, 2500);
+}
+
+function abandonPreparation(room) {
+    if (rooms.get(room.code) === room) { room.phase = 'lobby'; }
+    cleanupRoomBots(room);
+}
 
 function handleUserLeave(socket) {
     const roomCode = socket.roomCode;
-    if (!roomCode || !rooms.has(roomCode)) return;
+    socket.roomCode = null;
+    socket.leave(roomCode);
     const room = rooms.get(roomCode);
+    if (!room) return;
 
-    if (room.blue && room.blue.socketId === socket.id) {
-        room.blue = null;
-    } else if (room.red && room.red.socketId === socket.id) {
-        room.red = null;
+    const seat = room.blue && room.blue.socketId === socket.id ? room.blue
+        : room.red && room.red.socketId === socket.id ? room.red : null;
+    const wasSeated = !!seat;
+    if (seat) {
+        // clean the leaver's compiled bot BEFORE the seat is emptied (resetRoom can no longer see it afterwards)
+        if (seat.handler) { runner.cleanupBot(seat.handler); seat.handler = null; }
+        if (seat === room.blue) room.blue = null; else room.red = null;
     } else {
         room.spectators = room.spectators.filter(s => s.socketId !== socket.id);
     }
 
     if (!room.blue && !room.red) {
-        if (room.signal) room.signal.aborted = true;
+        resetRoom(room);
         rooms.delete(roomCode);
-    } else {
-        if (room.gameActive) {
-            room.gameActive = false;
-            if (room.signal) room.signal.aborted = true;
-            io.to(roomCode).emit('match_error', 'Đối thủ đã rời phòng. Trận đấu kết thúc!');
-        }
-        io.to(roomCode).emit('room_updated', getRoomPublicState(room));
+        return;
     }
+    if (wasSeated) {
+        const wasPlaying = room.gameActive;
+        resetRoom(room);
+        if (wasPlaying) io.to(roomCode).emit('match_error', 'Đối thủ đã rời phòng. Trận đấu kết thúc!');
+    }
+    io.to(roomCode).emit('room_updated', getRoomPublicState(room));
 }
 
 function isRated(room) {
@@ -397,6 +448,7 @@ function getRoomPublicState(room) {
 // ===== Online match (authoritative server loop, shared with tournaments via matchplay.js) =====
 
 async function startOnlineMatch(room) {
+    room.phase = 'playing';
     room.gameActive = true;
     room.signal = { aborted: false };
     room.moveHistory = [];
@@ -447,15 +499,16 @@ async function startOnlineMatch(room) {
     });
 
     // Temp files of the (re)compiled bots are no longer needed, whatever the outcome
-    if (blue.handler) runner.cleanupBot(blue.handler);
-    if (red.handler) runner.cleanupBot(red.handler);
+    if (blue.handler) { runner.cleanupBot(blue.handler); blue.handler = null; }
+    if (red.handler) { runner.cleanupBot(red.handler); red.handler = null; }
 
-    if (result.aborted) return;   // a player left / rematch requested - handled by the caller
+    if (result.aborted) { if (room.phase === 'playing') room.phase = 'lobby'; return; }   // a player left / rematch requested
     finishOnlineMatch(room, result, blueInfo, redInfo, rated);
 }
 
 function finishOnlineMatch(room, result, blueInfo, redInfo, rated) {
     room.gameActive = false;
+    room.phase = 'lobby';
 
     // Elo + W/L/D live in the accounts table and move only for rated games
     // (two different logged-in players). Guest games are recorded but never touch the ladder.
@@ -520,6 +573,37 @@ runner.detectToolchains().then(t => {
     sb.notes.forEach(n => console.log(`   ⚠ ${n}`));
 });
 tournament.recoverOnBoot();
+backup.startSchedule();
+
+
+// ===== Graceful shutdown =====
+// SIGTERM/SIGINT (Ctrl+C, systemd, Docker): stop taking traffic, stop the schedulers (tournaments resume on the
+// next boot), abort running matches, kill bot processes, remove temp files, flush SQLite, exit.
+let shuttingDown = false;
+async function shutdown(reason, exitCode = 0) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\n⏹  Đang tắt máy chủ (${reason})…`);
+    setTimeout(() => process.exit(exitCode || 1), 12_000).unref();       // never hang on shutdown
+    try {
+        server.close();
+        io.emit('server_shutdown', { message: 'Máy chủ đang khởi động lại. Hãy tải lại trang sau giây lát.' });
+        backup.stopSchedule();
+        await tournament.shutdown();
+        rooms.forEach(room => resetRoom(room));
+        runner.killAll();
+        runner.cleanupTempDir();
+        io.close();
+        db.close();
+    } catch (err) {
+        console.error('[shutdown]', err);
+    }
+    process.exit(exitCode);
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', err));
+process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err); shutdown('uncaughtException', 1); });
 
 auth.ensureDefaultAdmin().then((created) => {
     if (created) console.log('Tài khoản admin mặc định đã được tạo. Đăng nhập bằng admin / adminadmin và đổi mật khẩu ngay.');
@@ -528,7 +612,7 @@ auth.ensureDefaultAdmin().then((created) => {
         console.log(`🏆 Giải đấu & lịch sử trận:  http://localhost:${PORT}/arena.html`);
         if (auth.ADMIN_KEY_IS_GENERATED) {
             console.log(`🔑 ADMIN_KEY (tự sinh, đổi mỗi lần chạy): ${auth.ADMIN_KEY}`);
-            console.log('   Đặt biến môi trường ADMIN_KEY để giữ khóa ổn định. Tài khoản có role admin cần khóa này mỗi lần đăng nhập.');
+            console.log('   Đặt biến môi trường ADMIN_KEY để dùng khóa cố định. Tài khoản admin cần khóa này khi đăng nhập.');
         }
     });
 }).catch((err) => {

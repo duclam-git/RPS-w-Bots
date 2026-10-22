@@ -22,8 +22,7 @@ const USERNAME_RE = /^[A-Za-z0-9_.-]{3,20}$/;
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
 
 // ---------------------------------------------------------------------
-// Admin key (bootstrap / scripting). A logged-in user can also be promoted to role "admin"
-// by presenting the key once (POST /api/auth/claim-admin); after that the key is not needed.
+// Admin key protects login for the pre-provisioned administrator account.
 // ---------------------------------------------------------------------
 const ADMIN_KEY = process.env.ADMIN_KEY || crypto.randomBytes(9).toString('base64url');
 const ADMIN_KEY_IS_GENERATED = !process.env.ADMIN_KEY;
@@ -56,10 +55,8 @@ async function verifyPassword(password, stored) {
 async function ensureDefaultAdmin() {
     const exists = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
     if (exists) return false;
-
     const hash = await hashPassword('adminadmin');
     return db.transaction(() => {
-        // Recheck after hashing in case another initializer created an account meanwhile.
         if (db.prepare('SELECT COUNT(*) AS n FROM users').get().n) return false;
         db.prepare(`INSERT INTO users (username, password_hash, role, created_at)
                     VALUES ('admin', ?, 'admin', ?)`)
@@ -140,7 +137,7 @@ function attachUser(req, res, next) {
     next();
 }
 
-const isAdminReq = (req) => (req.user && req.user.role === 'admin') || validAdminKey(req.get('x-admin-key'));
+const isAdminReq = (req) => !!(req.user && req.user.role === 'admin');
 
 function requireUser(req, res, next) {
     if (!req.user) return res.status(401).json({ error: 'Bạn cần đăng nhập' });
@@ -304,13 +301,6 @@ function createRouter({ rateLimit }) {
 
     router.get('/auth/me', (req, res) => {
         res.json({ user: publicUser(req.user), isAdmin: !!isAdminReq(req) });
-    });
-
-    // Present the ADMIN_KEY once while logged in -> account becomes admin permanently.
-    router.post('/auth/claim-admin', requireUser, loginLimit, (req, res) => {
-        if (!validAdminKey((req.body || {}).key)) return res.status(403).json({ error: 'Sai khóa admin' });
-        db.prepare(`UPDATE users SET role = 'admin' WHERE id = ?`).run(req.user.id);
-        res.json({ ok: true });
     });
 
     router.post('/auth/password', requireUser, loginLimit, wrap(async (req, res) => {

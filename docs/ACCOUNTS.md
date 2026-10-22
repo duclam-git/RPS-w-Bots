@@ -11,7 +11,7 @@
 | Chống đoán mật khẩu | Giới hạn theo IP + khóa tăng dần theo tên đăng nhập (5 lần sai → khóa 30 giây, nhân đôi mỗi lần sai tiếp). Có hash giả khi tên không tồn tại để không lộ tên nào có thật qua thời gian phản hồi. |
 | CSRF | Request ghi (POST/PUT/DELETE) có header `Origin` khác host bị từ chối + cookie `SameSite=Lax`. |
 | Đổi mật khẩu | Trang hồ sơ của mình; mọi thiết bị khác bị đăng xuất. |
-| Admin | Đăng nhập → bấm 🔑 → nhập `ADMIN_KEY` **một lần** → tài khoản thành admin vĩnh viễn (cột `role`). Header `X-Admin-Key` vẫn dùng được cho script. |
+| Admin | Chỉ tài khoản được cấp role `admin` mới có quyền quản trị; người chơi không thể tự nâng quyền. Đăng nhập tài khoản admin cần `ADMIN_KEY`. |
 
 ### Tài khoản admin mặc định
 
@@ -27,7 +27,7 @@ Tên trùng bot hệ thống (Grandmaster AI, Tactical AI…) bị chặn khi đ
 - Trận luyện tập trong trình duyệt gắn với tài khoản cho phía do bạn điều khiển (bot code / thủ công).
 - Bảng xếp hạng cũ trong `leaderboard.json` chỉ còn dùng cho các AI tham chiếu 🤖 (chỉ đọc). Điểm của người chơi cũ theo tên **không** được chuyển sang (vì không xác minh được chủ sở hữu).
 
-API: `POST /api/auth/register|login|logout|password|claim-admin|lang`, `GET /api/auth/me`, `GET /api/leaderboard`, `GET /api/users/:tên`, `GET /api/matches?mine=1|user=<tên>`.
+API: `POST /api/auth/register|login|logout|password|lang`, `GET /api/auth/me`, `GET /api/leaderboard`, `GET /api/users/:tên`, `GET /api/matches?mine=1|user=<tên>`.
 CSDL: migration v2 trong `db.js` — `users`, `sessions`, cột `entries.user_id`, `matches.blue_user_id/red_user_id`.
 
 ## 3. Lỗi "Ace Editor không nhận 2 ngôn ngữ / chạy bị lỗi" (#1) — các nguyên nhân thật tìm được

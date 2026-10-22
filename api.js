@@ -4,6 +4,7 @@
 
 const express = require('express');
 const engine = require('./engine');
+const games = require('./games');
 const { saveMatch, listMatches, getMatch } = require('./db');
 const tournament = require('./tournament');
 
@@ -48,16 +49,38 @@ const router = express.Router();
 router.use(auth.createRouter({ rateLimit }));
 
 // Rules editor support: the defaults, and a pure validator (same code the server applies on save)
-router.get('/rules/default', (req, res) => res.json(engine.DEFAULT_RULES));
-router.post('/rules/validate', (req, res) => {
-    const v = engine.validateRules(req.body || {});
+const gameParam = (req) => {
+    const g = games.get(String(req.query.game || games.DEFAULT_GAME));
+    if (!g) throw new HttpError(400, 'Trò chơi không tồn tại');
+    return g;
+};
+router.get('/games', (req, res) => res.json(games.list()));
+router.get('/rules/default', wrap((req, res) => {
+    const g = gameParam(req);
+    res.json(g.id === 'rps' ? g.DEFAULT_RULES : g.resolveRules({}));
+}));
+router.post('/rules/validate', wrap((req, res) => {
+    const v = gameParam(req).validateRules(req.body || {});
     res.json({ ok: v.ok, errors: v.errors });
-});
+}));
 
 // Admin: how well are untrusted bots confined on this server?
 router.get('/admin/sandbox', requireAdmin, (req, res) => {
     const runner = require('./runner');
-    res.json({ sandbox: runner.getSandboxStatus(), toolchains: runner.getToolchains() });
+    res.json({ sandbox: runner.getSandboxStatus(), toolchains: runner.getToolchains(), load: runner.getStats() });
+});
+
+// Admin: backups (SQLite online backup; the file contains password hashes + bot code -> admin only)
+const backup = require('./backup');
+router.get('/admin/backups', requireAdmin, (req, res) => res.json({ enabled: backup.available(), backups: backup.list() }));
+router.post('/admin/backups', requireAdmin, wrap(async (req, res) => {
+    if (!backup.available()) throw new HttpError(409, 'Cơ sở dữ liệu trong bộ nhớ không thể sao lưu');
+    res.status(201).json(await backup.backupNow());
+}));
+router.get('/admin/backups/:name', requireAdmin, (req, res) => {
+    const file = backup.resolve(req.params.name);
+    if (!file) return res.status(404).json({ error: 'Không tìm thấy bản sao lưu' });
+    res.download(file, req.params.name);
 });
 
 // Which languages can this server run? (the editor greys out the ones that are missing)
@@ -68,7 +91,8 @@ router.get('/languages', (req, res) => res.json(require('./runner').getToolchain
 // =====================================================================
 
 router.get('/matches', wrap((req, res) => {
-    const { kind, tournament: tid, player, limit, offset, mine, user } = req.query;
+    const { kind, tournament: tid, player, limit, offset, mine, user, game } = req.query;
+    if (game && !games.has(String(game))) throw new HttpError(400, 'Trò chơi không tồn tại');
     let userId;
     if (mine === '1') {
         if (!req.user) throw new HttpError(401, 'Bạn cần đăng nhập');
@@ -79,7 +103,7 @@ router.get('/matches', wrap((req, res) => {
     }
     if (kind && !['online', 'local', 'tournament'].includes(kind)) throw new HttpError(400, 'kind không hợp lệ');
     res.json(listMatches({
-        kind, player, limit, offset, userId,
+        kind, player, limit, offset, userId, game,
         tournamentId: tid ? idParam(tid) : undefined
     }));
 }));
@@ -95,7 +119,7 @@ router.get('/matches/:id', wrap((req, res) => {
     const m = getMatch(idParam(req.params.id));
     if (!m) throw new HttpError(404, 'Không tìm thấy trận đấu');
     // initial position is derived from the stored rules snapshot, so replay never depends on current code
-    m.initialBoard = engine.createInitialBoard(m.rules);
+    m.initialBoard = (games.get(m.game) || games.get(games.DEFAULT_GAME)).createInitialBoard(m.rules);
     res.json(m);
 }));
 

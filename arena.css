@@ -246,3 +246,12 @@ tr.me td { background: var(--gold-bg); font-weight: 700; }
 .sc-admin { display: flex; gap: .3rem; padding: .25rem .5rem .4rem; background: var(--surface-2); flex-wrap: wrap; }
 .sc-admin button { font: inherit; font-size: .68rem; font-weight: 700; padding: .1rem .4rem; border: 1.5px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); cursor: pointer; }
 .sc-admin button.danger { color: var(--red); }
+
+/* ---------- games ---------- */
+.pc.stone { width: 74%; height: 74%; }
+.pc.stone.p1 { background: var(--blue); border-color: var(--blue); }
+.pc.stone.p2 { background: var(--red); border-color: var(--red); }
+.bd .c.to .pc.stone { box-shadow: 0 0 0 3px #f59e0b; }
+.beats-table { border-collapse: collapse; font-size: .85rem; }
+.beats-table th, .beats-table td { border: 1px solid var(--line); padding: .25rem .5rem; text-align: center; }
+.badge.game { background: var(--surface-2); }

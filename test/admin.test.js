@@ -15,6 +15,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const KEY = 'admin-test-key';
 const DB = path.join(os.tmpdir(), `ott-admin-${process.pid}.db`);
 const LB = path.join(os.tmpdir(), `ott-admin-${process.pid}-lb.json`);
+const BK = path.join(os.tmpdir(), `ott-admin-${process.pid}-backups`);
 let server;
 
 const RUSHER = `function getNextMove(s, h) { let b = null, d = 1e9; for (const m of s.legalMoves) { const x = h.distance(m.to.r, m.to.c, s.myGoal.r, s.myGoal.c) - (m.capture ? .5 : 0); if (x < d) { d = x; b = m; } } return b; }`;
@@ -47,7 +48,7 @@ async function waitFinished(tid) {
 test.before(async () => {
     server = spawn(process.execPath, ['server.js'], {
         cwd: path.join(__dirname, '..'),
-        env: { ...process.env, PORT: String(PORT), DB_PATH: DB, ADMIN_KEY: KEY, DISABLE_RATE_LIMIT: '1', LEADERBOARD_PATH: LB },
+        env: { ...process.env, PORT: String(PORT), DB_PATH: DB, ADMIN_KEY: KEY, DISABLE_RATE_LIMIT: '1', LEADERBOARD_PATH: LB, BACKUP_DIR: BK, BACKUP_KEEP: '2', BACKUP_INTERVAL_HOURS: '0' },
         stdio: ['ignore', 'pipe', 'pipe']
     });
     await new Promise((resolve, reject) => {
@@ -59,6 +60,7 @@ test.before(async () => {
 test.after(() => {
     if (server) server.kill();
     for (const f of [DB, DB + '-wal', DB + '-shm', LB]) { try { fs.unlinkSync(f); } catch (e) {} }
+    try { fs.rmSync(BK, { recursive: true, force: true }); } catch (e) {}
 });
 
 // ---------------------------------------------------------------- rules
@@ -306,4 +308,180 @@ test('editing right after pausing / finishing waits for the scheduler instead of
     const run2 = await admin.call('POST', `/api/tournaments/${tid}/run`, { mode: 'all' }, A);
     assert.strictEqual(run2.json.started, true, 'a fresh loop starts right after the reset');
     assert.ok((await waitFinished(tid)).tournament.champion);
+});
+
+
+// ---------------------------------------------------------------- backups
+test('backups: consistent SQLite snapshot, admin-only, safe download, old ones pruned', async () => {
+    const Database = require('better-sqlite3');
+    const c = new Client();
+    const reg = await c.call('POST', '/api/auth/register', { username: 'Backup_Probe', password: 'password-123' });
+    assert.strictEqual(reg.status, 201);
+
+    assert.strictEqual((await new Client().call('POST', '/api/admin/backups')).status, 401);
+    assert.strictEqual((await new Client().call('GET', '/api/admin/backups')).status, 401);
+
+    const made = [];
+    for (let i = 0; i < 4; i++) {
+        const r = await admin.call('POST', '/api/admin/backups', undefined, A);
+        assert.strictEqual(r.status, 201, JSON.stringify(r.json));
+        assert.ok(r.json.size > 0);
+        made.push(r.json.name);
+    }
+    assert.strictEqual(new Set(made).size, 4, 'same-second backups get distinct names');
+
+    const list = (await admin.call('GET', '/api/admin/backups', undefined, A)).json;
+    assert.strictEqual(list.enabled, true);
+    assert.strictEqual(list.backups.length, 2, 'only BACKUP_KEEP=2 newest are kept');
+
+    // the snapshot is a real, openable database that contains the data
+    const db = new Database(path.join(BK, list.backups[0].name), { readonly: true });
+    assert.ok(db.prepare("SELECT COUNT(*) AS n FROM users WHERE username = 'Backup_Probe'").get().n === 1);
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'match_moves'").get());
+    db.close();
+
+    const dl = await fetch(BASE + '/api/admin/backups/' + list.backups[0].name, { headers: A });
+    assert.strictEqual(dl.status, 200);
+    assert.strictEqual(Buffer.from(await dl.arrayBuffer()).subarray(0, 15).toString(), 'SQLite format 3');
+    assert.strictEqual((await fetch(BASE + '/api/admin/backups/' + list.backups[0].name)).status, 401);
+    for (const evil of ['..%2F..%2Fetc%2Fpasswd', '%2e%2e%2fserver.js', 'ott-20260101-000000.db%00.txt', 'x.db']) {
+        assert.strictEqual((await fetch(BASE + '/api/admin/backups/' + evil, { headers: A })).status, 404, evil);
+    }
+});
+
+
+// ---------------------------------------------------------------- tournament leftovers
+test('round robin: a table that is still level at the top is settled by a playoff, not by the seed', async () => {
+    // identical bots: each wins as Blue, so a 2-game pairing is 1-1 and the table is perfectly level
+    const tid = await create({ bestOf: 3, groupBestOf: 2, rules: { maxPlies: 40 } }, 'round_robin');
+    await enter(tid, 2);
+    await admin.call('POST', `/api/tournaments/${tid}/start`, {}, A);
+    let d = await detail(tid);
+    assert.strictEqual(d.series.filter(s => s.stage === 'bracket').length, 0);
+    await admin.call('POST', `/api/tournaments/${tid}/run`, { mode: 'all' }, A);
+    d = await waitFinished(tid);
+    const playoff = d.series.filter(s => s.stage === 'bracket');
+    assert.strictEqual(playoff.length, 1, 'one playoff series was created');
+    assert.strictEqual(playoff[0].status, 'done');
+    assert.strictEqual(d.tournament.champion.id, playoff[0].winnerEntry, 'the playoff winner is the champion');
+    assert.ok(playoff[0].gamesPlayed >= 2);
+});
+
+test('groups -> knockout: 4 groups with 2 qualifiers never produce same-group rematches in round one', async () => {
+    const tid = await create({ groupCount: 4, advance: 2, groupBestOf: 1, bestOf: 1, concurrency: 4, rules: { maxPlies: 30 } }, 'groups_knockout');
+    await enter(tid, 8);
+    await admin.call('POST', `/api/tournaments/${tid}/start`, { seeding: 'registration' }, A);
+    await admin.call('POST', `/api/tournaments/${tid}/run`, { mode: 'all' }, A);
+    const d = await waitFinished(tid);
+    const groupOfName = Object.fromEntries(d.entries.map(e => [e.id, e.groupNo]));
+    const round1 = d.series.filter(s => s.stage === 'bracket' && s.round === 1);
+    assert.strictEqual(round1.length, 4);
+    for (const s of round1) assert.notStrictEqual(groupOfName[s.a.id], groupOfName[s.b.id], `${s.a.name} v ${s.b.name} are groupmates`);
+});
+
+// ---------------------------------------------------------------- second game + extended rules
+const GAMES = require('../games');
+global.window = global.window || {};
+require('../bot_templates.js');
+const TPL = global.window.GAME_TEMPLATES;
+
+test('games list, per-game default rules and validation endpoints', async () => {
+    const list = (await admin.call('GET', '/api/games')).json;
+    assert.deepStrictEqual(list.map(g => g.id).sort(), ['caro', 'rps']);
+    assert.ok(list.every(g => g.name && g.description && g.defaultRules));
+    const caro = (await admin.call('GET', '/api/rules/default?game=caro')).json;
+    assert.deepStrictEqual([caro.rows, caro.winLength], [15, 5]);
+    assert.strictEqual((await admin.call('GET', '/api/rules/default')).json.setup.p1.length, 10, 'rps stays the default game');
+    assert.strictEqual((await admin.call('GET', '/api/rules/default?game=chess')).status, 400);
+    assert.strictEqual((await admin.call('POST', '/api/rules/validate?game=caro', { size: 3, winLength: 3 })).json.ok, true);
+    assert.strictEqual((await admin.call('POST', '/api/rules/validate?game=caro', { size: 5, winLength: 6 })).json.ok, false);
+    assert.strictEqual((await admin.call('POST', '/api/rules/validate', { size: 7 })).json.ok, false, 'rps: a new board size needs its own setup');
+});
+
+test('caro tournament end to end: bots of 3 languages, stored with the right game, replays, wrong-game bots refused', async () => {
+    const bad = await admin.call('POST', '/api/tournaments', { name: 'x', format: 'single_elim', game: 'chess' }, A);
+    assert.strictEqual(bad.status, 400);
+    const badRules = await admin.call('POST', '/api/tournaments', { name: 'x', format: 'single_elim', game: 'caro', config: { rules: { size: 5, winLength: 6 } } }, A);
+    assert.strictEqual(badRules.status, 400);
+
+    const mk = await admin.call('POST', '/api/tournaments', {
+        name: 'Caro Cup', format: 'single_elim', game: 'caro',
+        config: { requireLogin: false, bestOf: 1, concurrency: 3, rules: { size: 9, winLength: 5, maxPlies: 81 } }
+    }, A);
+    assert.strictEqual(mk.status, 201, JSON.stringify(mk.json));
+    const tid = mk.json.id;
+
+    // a bot written for the RPS game (it reads state.myGoal) cannot enter a caro tournament - with a clear reason
+    const wrong = await admin.call('POST', `/api/tournaments/${tid}/entries`, { name: 'WrongGame', lang: 'javascript', code: RUSHER });
+    assert.strictEqual(wrong.status, 422);
+    assert.match(wrong.json.error, /không chạy được/);
+
+    const langs = ['javascript'];
+    if (require('../sandbox').which('python3')) langs.push('python');
+    if (require('../sandbox').which('g++')) langs.push('cpp');
+    for (const lang of langs) {
+        const r = await admin.call('POST', `/api/tournaments/${tid}/entries`, { name: `Caro_${lang}`, lang, code: TPL.caro[lang].blue });
+        assert.strictEqual(r.status, 201, `${lang}: ${JSON.stringify(r.json)}`);
+    }
+    await admin.call('POST', `/api/tournaments/${tid}/entries`, { name: 'Caro_js2', lang: 'javascript', code: TPL.caro.javascript.blue });
+
+    // the game cannot be swapped once bots exist or the tournament started
+    assert.strictEqual((await admin.call('PATCH', `/api/tournaments/${tid}`, { game: 'rps' }, A)).status, 409);
+    assert.strictEqual((await admin.call('POST', `/api/tournaments/${tid}/start`, {}, A)).status, 200);
+    assert.strictEqual((await admin.call('PATCH', `/api/tournaments/${tid}`, { game: 'rps' }, A)).status, 409);
+
+    await admin.call('POST', `/api/tournaments/${tid}/run`, { mode: 'all' }, A);
+    const d = await waitFinished(tid);
+    assert.ok(d.tournament.champion);
+    assert.strictEqual(d.tournament.game.id, 'caro');
+    assert.strictEqual(d.tournament.rules.rows, 9);
+
+    assert.ok((await admin.call('GET', '/api/tournaments')).json.find(t => t.id === tid).game === 'caro');
+    const list = (await admin.call('GET', `/api/matches?tournament=${tid}&game=caro`)).json;
+    assert.ok(list.total >= 3 && list.rows.every(r => r.game === 'caro'));
+    assert.strictEqual((await admin.call('GET', `/api/matches?tournament=${tid}&game=rps`)).json.total, 0);
+
+    const m = (await admin.call('GET', `/api/matches/${list.rows[0].id}`)).json;
+    assert.strictEqual(m.game, 'caro');
+    assert.strictEqual(m.initialBoard.length, 9);
+    assert.ok(m.initialBoard.flat().every(x => x === null), 'caro starts empty');
+    assert.ok(m.moves.every(x => x.from === null && x.pieceType === 'stone'));
+    const caro = GAMES.get('caro');
+    const check = caro.replayAndValidate(m.moves.map(x => ({ player: x.player, to: x.to })), caro.resolveRules(m.rules));
+    assert.ok(check.ok, check.error);
+    assert.strictEqual(check.winner === 1 ? 'blue' : check.winner === 2 ? 'red' : 'draw', m.winner);
+    assert.ok(m.moves.every(x => !x.fallback), 'starter bots never needed the server to move for them');
+
+    // switching the game of an EMPTY tournament in registration swaps in that game's default rules
+    const t2 = (await admin.call('POST', '/api/tournaments', { name: 'swap', format: 'single_elim', game: 'caro' }, A)).json.id;
+    assert.strictEqual((await admin.call('PATCH', `/api/tournaments/${t2}`, { game: 'rps' }, A)).status, 200);
+    const d2 = await detail(t2);
+    assert.deepStrictEqual([d2.tournament.game.id, d2.tournament.rules.rows], ['rps', 9]);
+});
+
+test('RPS with a 7x7 board and a reversed capture cycle: stored, played and replayed under those rules', async () => {
+    const rules = {
+        size: 7, maxPlies: 60,
+        beats: { rock: ['paper'], paper: ['scissors'], scissors: ['rock'] },                       // the cycle runs the other way
+        setup: { p1: [{ r: 3, c: 1, t: 'rock' }, { r: 4, c: 1, t: 'paper' }, { r: 5, c: 2, t: 'scissors' }],
+            p2: [{ r: 3, c: 5, t: 'rock' }, { r: 2, c: 5, t: 'paper' }, { r: 1, c: 4, t: 'scissors' }] }
+    };
+    assert.strictEqual((await admin.call('POST', '/api/rules/validate', rules)).json.ok, true);
+    const tid = await create({ bestOf: 1, rules });
+    await enter(tid, 2);
+    await admin.call('POST', `/api/tournaments/${tid}/start`, {}, A);
+    await admin.call('POST', `/api/tournaments/${tid}/run`, { mode: 'all' }, A);
+    const d = await waitFinished(tid);
+    assert.strictEqual(d.tournament.rules.rows, 7);
+    assert.deepStrictEqual(d.tournament.rules.blueGoal, { r: 0, c: 6 });
+    assert.deepStrictEqual(d.tournament.rules.redGoal, { r: 6, c: 0 });
+    const list = (await admin.call('GET', `/api/matches?tournament=${tid}`)).json;
+    const m = (await admin.call('GET', `/api/matches/${list.rows[0].id}`)).json;
+    assert.strictEqual(m.initialBoard.length, 7);
+    assert.deepStrictEqual(m.rules.beats.rock, ['paper']);
+    const check = E.replayAndValidate(m.moves.map(x => ({ player: x.player, from: x.from, to: x.to })), E.resolveRules(m.rules));
+    assert.ok(check.ok, check.error);
+    // the bot state carried the rules, so JS helpers (canCapture) follow the custom table
+    assert.strictEqual(E.canCapture('rock', 'paper', E.resolveRules(m.rules)), true);
+    assert.strictEqual(E.canCapture('rock', 'scissors', E.resolveRules(m.rules)), false);
 });

@@ -2642,11 +2642,13 @@
         updateStatusTicker("Sẵn sàng! Lập trình bot và bấm 'Bắt đầu đấu'.");
     }
 
-    // Auto-init on DOM loaded
+    // The login gate releases the game only after the shared session is known.
     function initAfterAuthentication() {
         if (window.OTT_AUTH && window.OTT_AUTH.ready) init();
         else document.addEventListener('ott-authenticated', init, { once: true });
     }
+
+    // Auto-init on DOM loaded
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initAfterAuthentication);
     } else {

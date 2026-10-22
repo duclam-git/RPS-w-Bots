@@ -333,4 +333,218 @@ if __name__ == "__main__":
         }
     };
 
+
+    // ==========================================
+    // Starter templates per GAME. rps = the classic set above; caro = Cờ Caro (Gomoku).
+    // ==========================================
+    const caroJs = String.raw`/**
+ * ⚫ BOT CỜ CARO (JavaScript)
+ * state.grid       : mảng chuỗi, mỗi ký tự là một ô: '0' trống, '1' Xanh, '2' Đỏ
+ * state.myPlayer   : bạn là 1 (Xanh, đi trước) hay 2 (Đỏ);  state.winLength: số quân liên tiếp để thắng
+ * state.legalMoves : mọi ô trống, dạng { to: { r, c } }
+ * Trả về một phần tử của legalMoves (hoặc { to: { r, c } }).
+ */
+function getNextMove(state, helpers, log) {
+    const grid = state.grid.map(row => row.split('').map(Number));
+    const N = grid.length, me = state.myPlayer, opp = state.opponentPlayer, W = state.winLength;
+    const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
+
+    // Nếu đặt quân p vào (r, c): chuỗi dài bao nhiêu và có mấy đầu còn mở?
+    function line(r, c, p, dr, dc) {
+        let n = 1, open = 0;
+        for (const s of [1, -1]) {
+            for (let i = 1; ; i++) {
+                const rr = r + s * dr * i, cc = c + s * dc * i;
+                if (rr < 0 || cc < 0 || rr >= N || cc >= N) break;
+                if (grid[rr][cc] === p) n++;
+                else { if (grid[rr][cc] === 0) open++; break; }
+            }
+        }
+        return { n, open };
+    }
+    function score(r, c, p) {
+        let total = 0;
+        for (const [dr, dc] of dirs) {
+            const { n, open } = line(r, c, p, dr, dc);
+            if (n >= W) total += 1e7;                                   // thắng ngay (hoặc chặn thua ngay)
+            else total += [0, 1, 10, 100, 1000, 10000][Math.min(n, 5)] * (open === 2 ? 2 : open === 1 ? 1 : 0.1);
+        }
+        return total;
+    }
+
+    const mid = (N - 1) / 2;
+    let best = null, bestScore = -Infinity;
+    for (const m of state.legalMoves) {
+        const { r, c } = m.to;
+        const s = score(r, c, me) * 1.1 + score(r, c, opp) - (Math.abs(r - mid) + Math.abs(c - mid)) * 0.01;
+        if (s > bestScore) { bestScore = s; best = m; }
+    }
+    log('chọn', best.to, 'điểm', Math.round(bestScore));
+    return best;
+}`;
+    const caroPy = String.raw`"""
+BOT CỜ CARO (Python 3)
+state["grid"]       : danh sách chuỗi, mỗi ký tự là một ô: '0' trống, '1' Xanh, '2' Đỏ
+state["myPlayer"]   : bạn là 1 (Xanh, đi trước) hay 2 (Đỏ);  state["winLength"]: số quân liên tiếp để thắng
+state["legalMoves"] : mọi ô trống, dạng {"to": {"r": r, "c": c}}
+In ra một dòng JSON: {"to": {"r": r, "c": c}}.  Ghi log: in ra stderr.
+"""
+import json
+import sys
+
+
+def line(grid, n_size, r, c, p, dr, dc):
+    n, open_ends = 1, 0
+    for s in (1, -1):
+        i = 1
+        while True:
+            rr, cc = r + s * dr * i, c + s * dc * i
+            if rr < 0 or cc < 0 or rr >= n_size or cc >= n_size:
+                break
+            if grid[rr][cc] == p:
+                n += 1
+                i += 1
+            else:
+                if grid[rr][cc] == 0:
+                    open_ends += 1
+                break
+    return n, open_ends
+
+
+def score(grid, n_size, w, r, c, p):
+    total = 0.0
+    weights = [0, 1, 10, 100, 1000, 10000]
+    for dr, dc in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        n, open_ends = line(grid, n_size, r, c, p, dr, dc)
+        if n >= w:
+            total += 1e7                      # thắng ngay (hoặc chặn thua ngay)
+        else:
+            total += weights[min(n, 5)] * (2 if open_ends == 2 else 1 if open_ends == 1 else 0.1)
+    return total
+
+
+def main():
+    state = json.loads(sys.stdin.read())
+    grid = [[int(ch) for ch in row] for row in state["grid"]]
+    n_size, me, opp, w = len(grid), state["myPlayer"], state["opponentPlayer"], state["winLength"]
+    mid = (n_size - 1) / 2
+    best, best_score = None, float("-inf")
+    for m in state["legalMoves"]:
+        r, c = m["to"]["r"], m["to"]["c"]
+        s = score(grid, n_size, w, r, c, me) * 1.1 + score(grid, n_size, w, r, c, opp) - (abs(r - mid) + abs(c - mid)) * 0.01
+        if s > best_score:
+            best, best_score = m, s
+    sys.stderr.write("chon %s diem %d\n" % (best["to"], best_score))
+    print(json.dumps({"to": best["to"]}))
+
+
+main()`;
+    const caroCpp = String.raw`/**
+ * BOT CỜ CARO (C++17)
+ * stdin : JSON state. Dùng "grid" (mảng chuỗi: '0' trống, '1' Xanh, '2' Đỏ), "myPlayer", "winLength".
+ * stdout: {"to":{"r":R,"c":C}}      stderr: log
+ */
+#include <algorithm>
+#include <cstdlib>
+#include <iostream>
+#include <iterator>
+#include <string>
+#include <vector>
+
+// ---------- đọc JSON tối giản ----------
+std::string extractArray(const std::string& s, const std::string& key) {
+    size_t k = s.find("\"" + key + "\"");
+    if (k == std::string::npos) return "";
+    size_t b = s.find('[', k);
+    if (b == std::string::npos) return "";
+    int depth = 0;
+    for (size_t i = b; i < s.size(); i++) {
+        if (s[i] == '[') depth++;
+        else if (s[i] == ']' && --depth == 0) return s.substr(b, i - b + 1);
+    }
+    return "";
+}
+
+int readInt(const std::string& s, const std::string& key, int fallback) {
+    size_t k = s.find("\"" + key + "\"");
+    if (k == std::string::npos) return fallback;
+    size_t colon = s.find(':', k);
+    return colon == std::string::npos ? fallback : std::atoi(s.c_str() + colon + 1);
+}
+
+std::vector<std::string> parseGrid(const std::string& input) {
+    std::vector<std::string> rows;
+    const std::string arr = extractArray(input, "grid");
+    size_t pos = 0;
+    while (true) {
+        size_t a = arr.find('"', pos);
+        if (a == std::string::npos) break;
+        size_t b = arr.find('"', a + 1);
+        if (b == std::string::npos) break;
+        rows.push_back(arr.substr(a + 1, b - a - 1));
+        pos = b + 1;
+    }
+    return rows;
+}
+
+std::vector<std::string> grid;
+int N = 0, W = 5;
+
+// Nếu đặt quân p vào (r, c): chuỗi dài bao nhiêu và có mấy đầu còn mở?
+void line(int r, int c, char p, int dr, int dc, int& n, int& open) {
+    n = 1; open = 0;
+    for (int s = 1; s >= -1; s -= 2) {
+        for (int i = 1;; i++) {
+            int rr = r + s * dr * i, cc = c + s * dc * i;
+            if (rr < 0 || cc < 0 || rr >= N || cc >= N) break;
+            if (grid[rr][cc] == p) n++;
+            else { if (grid[rr][cc] == '0') open++; break; }
+        }
+    }
+}
+
+double score(int r, int c, char p) {
+    static const double weights[] = {0, 1, 10, 100, 1000, 10000};
+    double total = 0;
+    const int dirs[4][2] = {{0, 1}, {1, 0}, {1, 1}, {1, -1}};
+    for (auto& d : dirs) {
+        int n, open;
+        line(r, c, p, d[0], d[1], n, open);
+        if (n >= W) total += 1e7;                       // thắng ngay (hoặc chặn thua ngay)
+        else total += weights[std::min(n, 5)] * (open == 2 ? 2 : open == 1 ? 1 : 0.1);
+    }
+    return total;
+}
+
+int main() {
+    std::string input((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
+    grid = parseGrid(input);
+    N = (int)grid.size();
+    if (N == 0) return 0;
+    int meNum = readInt(input, "myPlayer", 1);
+    W = readInt(input, "winLength", 5);
+    char me = (char)('0' + meNum), opp = (char)('0' + (meNum == 1 ? 2 : 1));
+
+    double mid = (N - 1) / 2.0, bestScore = -1e18;
+    int br = -1, bc = -1;
+    for (int r = 0; r < N; r++) {
+        for (int c = 0; c < N; c++) {
+            if (grid[r][c] != '0') continue;
+            double s = score(r, c, me) * 1.1 + score(r, c, opp) - (std::abs(r - mid) + std::abs(c - mid)) * 0.01;
+            if (s > bestScore) { bestScore = s; br = r; bc = c; }
+        }
+    }
+    if (br < 0) return 0;
+    std::cerr << "chon " << br << "," << bc << std::endl;
+    std::cout << "{\"to\":{\"r\":" << br << ",\"c\":" << bc << "}}" << std::endl;
+    return 0;
+}`;
+    window.GAME_TEMPLATES = {
+        rps: window.MULTI_LANG_TEMPLATES,
+        caro: {
+            javascript: { blue: caroJs, red: caroJs },
+            python: { blue: caroPy, red: caroPy },
+            cpp: { blue: caroCpp, red: caroCpp }
+        }
+    };
 })(window);

@@ -12,6 +12,7 @@
 const crypto = require('crypto');
 const { db, saveMatch } = require('./db');
 const engine = require('./engine');
+const games = require('./games');
 const runner = require('./runner');
 const matchplay = require('./matchplay');
 
@@ -75,6 +76,40 @@ function snakeGroups(ids, groupCount) {
 }
 
 /**
+ * First-round slots as a flat list [a0,b0,a1,b1,...] (null = bye). Swaps entries between pairs so that two
+ * players from the same group do not meet in round one when that can be avoided. groupOf: entryId -> group.
+ * Prefers swapping with a distant pair so the seeding stays as intact as possible.
+ */
+function separateGroups(slots, groupOf) {
+    const out = slots.slice();
+    const clash = (x, y) => x != null && y != null && groupOf[x] !== undefined && groupOf[x] === groupOf[y];
+    const pairs = out.length / 2;
+    for (let i = 0; i < pairs; i++) {
+        if (!clash(out[2 * i], out[2 * i + 1])) continue;
+        // candidates: the lower seed of pair i swaps with either member of another pair
+        const order = [];
+        for (let d = 1; d < pairs; d++) { order.push((i + d) % pairs); }
+        order.sort((x, y) => Math.abs(y - i) - Math.abs(x - i));        // farthest pair first
+        let fixed = false;
+        for (const j of order) {
+            for (const k of [2 * j + 1, 2 * j]) {
+                const bi = 2 * i + 1;
+                const newI = [out[2 * i], out[k]];
+                const jOther = k === 2 * j ? out[2 * j + 1] : out[2 * j];
+                const newJ = k === 2 * j ? [out[bi], jOther] : [jOther, out[bi]];
+                if (!clash(newI[0], newI[1]) && !clash(newJ[0], newJ[1])) {
+                    [out[bi], out[k]] = [out[k], out[bi]];
+                    fixed = true;
+                    break;
+                }
+            }
+            if (fixed) break;
+        }
+    }
+    return out;
+}
+
+/**
  * Round-robin table. seriesRows: finished series of ONE group
  * ({ entry_a, entry_b, wins_a, wins_b, draws, winner_entry, status }).
  * Order: points (win 3 / tie 1) -> game difference -> games won -> better seed.
@@ -85,11 +120,10 @@ function computeStandings(entries, seriesRows) {
         entryId: e.id, name: e.name, seed: e.seed == null ? 9999 : e.seed,
         played: 0, won: 0, tied: 0, lost: 0, points: 0, gamesWon: 0, gamesLost: 0
     }));
-    for (const s of seriesRows) {
-        if (s.status !== 'done') continue;
+    const done = seriesRows.filter(s => s.status === 'done' && table.has(s.entry_a) && table.has(s.entry_b));
+    for (const s of done) {
         const a = table.get(s.entry_a);
         const b = table.get(s.entry_b);
-        if (!a || !b) continue;
         a.played++; b.played++;
         a.gamesWon += s.wins_a; a.gamesLost += s.wins_b;
         b.gamesWon += s.wins_b; b.gamesLost += s.wins_a;
@@ -98,9 +132,32 @@ function computeStandings(entries, seriesRows) {
         else { a.tied++; b.tied++; a.points++; b.points++; }
     }
     const rows = [...table.values()].map(r => ({ ...r, gameDiff: r.gamesWon - r.gamesLost }));
+    const main = (r) => `${r.points}|${r.gameDiff}|${r.gamesWon}`;
+
+    // Teams level on points, game difference AND games won: look at the games they played AGAINST EACH OTHER
+    // (mini-league, same 3/1/0 scoring); only then fall back to the better seed.
+    const buckets = new Map();
+    rows.forEach(r => { const k = main(r); (buckets.get(k) || buckets.set(k, []).get(k)).push(r); });
+    for (const group of buckets.values()) {
+        group.forEach(r => { r.h2h = 0; r.tied_unresolved = false; });
+        if (group.length < 2) continue;
+        const ids = new Set(group.map(r => r.entryId));
+        for (const s of done) {
+            if (!ids.has(s.entry_a) || !ids.has(s.entry_b)) continue;
+            const ra = group.find(r => r.entryId === s.entry_a), rb = group.find(r => r.entryId === s.entry_b);
+            if (s.winner_entry === ra.entryId) ra.h2h += 3;
+            else if (s.winner_entry === rb.entryId) rb.h2h += 3;
+            else { ra.h2h++; rb.h2h++; }
+        }
+    }
     rows.sort((x, y) =>
-        y.points - x.points || y.gameDiff - x.gameDiff || y.gamesWon - x.gamesWon || x.seed - y.seed);
-    rows.forEach((r, i) => { r.rank = i + 1; });
+        y.points - x.points || y.gameDiff - x.gameDiff || y.gamesWon - x.gamesWon || y.h2h - x.h2h || x.seed - y.seed);
+    // "unresolved" = still level after head-to-head: only the seed separates them (a playoff may be needed)
+    rows.forEach((r, i) => {
+        const same = (o) => o && main(o) === main(r) && o.h2h === r.h2h;
+        r.tied_unresolved = same(rows[i - 1]) || same(rows[i + 1]);
+        r.rank = i + 1;
+    });
     return rows;
 }
 
@@ -135,7 +192,7 @@ function clampInt(v, min, max, def) {
  * Normalises a tournament config. `strict` (admin input): invalid rules throw a 400 with every problem
  * listed. Non-strict (reading a stored config): invalid parts are silently dropped.
  */
-function normalizeConfig(raw = {}, strict = false) {
+function normalizeConfig(raw = {}, strict = false, gameId = games.DEFAULT_GAME) {
     const cfg = {
         bestOf: clampInt(raw.bestOf, 1, 9, 3),             // knockout series length
         groupBestOf: clampInt(raw.groupBestOf, 1, 6, 2),   // games per pairing in group / table stage
@@ -148,7 +205,7 @@ function normalizeConfig(raw = {}, strict = false) {
         rules: {}
     };
     if (raw.rules && typeof raw.rules === 'object') {
-        const v = engine.validateRules(raw.rules);
+        const v = (games.get(gameId) || games.get(games.DEFAULT_GAME)).validateRules(raw.rules);
         if (!v.ok && strict) throw new HttpError(400, `Luật chơi không hợp lệ: ${v.errors.join('; ')}`);
         cfg.rules = v.rules;     // overrides that passed validation (setup is dropped as a whole if invalid)
     }
@@ -158,8 +215,9 @@ function normalizeConfig(raw = {}, strict = false) {
 const getTournamentRow = (id) => db.prepare('SELECT * FROM tournaments WHERE id = ?').get(id);
 const getSeriesRow = (id) => db.prepare('SELECT * FROM series WHERE id = ?').get(id);
 const getEntryRow = (id) => db.prepare('SELECT * FROM entries WHERE id = ?').get(id);
-const tConfig = (t) => normalizeConfig(JSON.parse(t.config_json || '{}'));
-const tRules = (t) => engine.resolveRules(tConfig(t).rules);
+const gameOf = (t) => games.get(t.game) || games.get(games.DEFAULT_GAME);
+const tConfig = (t) => normalizeConfig(JSON.parse(t.config_json || '{}'), false, t.game);
+const tRules = (t) => gameOf(t).resolveRules(tConfig(t).rules);
 
 class HttpError extends Error {
     constructor(status, message) { super(message); this.status = status; }
@@ -190,20 +248,21 @@ function liveForTournament(tid) {
         blue: g.blue, red: g.red, board: g.board0, moves: g.moves
     }));
 }
-
 function liveGameCount() { return liveGames.size; }
 
 // =====================================================================
 // Create / register / start
 // =====================================================================
 
-function createTournament({ name, format, config }) {
+function createTournament({ name, format, game, config }) {
     const cleanName = String(name || '').trim().slice(0, 80);
     if (!cleanName) throw new HttpError(400, 'Thiếu tên giải đấu');
     if (!FORMATS.includes(format)) throw new HttpError(400, `Thể thức không hợp lệ (${FORMATS.join(', ')})`);
-    const cfg = normalizeConfig(config, true);
-    const info = db.prepare(`INSERT INTO tournaments (name, format, config_json, created_at) VALUES (?, ?, ?, ?)`)
-        .run(cleanName, format, JSON.stringify(cfg), Date.now());
+    const gameId = game === undefined || game === null ? games.DEFAULT_GAME : String(game);
+    if (!games.has(gameId)) throw new HttpError(400, `Trò chơi không tồn tại (${games.list().map(g => g.id).join(', ')})`);
+    const cfg = normalizeConfig(config, true, gameId);
+    const info = db.prepare(`INSERT INTO tournaments (name, format, game, config_json, created_at) VALUES (?, ?, ?, ?, ?)`)
+        .run(cleanName, format, gameId, JSON.stringify(cfg), Date.now());
     notifyUpdated(Number(info.lastInsertRowid));
     return getTournamentRow(Number(info.lastInsertRowid));
 }
@@ -211,7 +270,7 @@ function createTournament({ name, format, config }) {
 let validationsInFlight = 0;
 
 /** Compile + run the bot once on the opening position; throws HttpError(422) with the reason if it fails. */
-async function validateBot(lang, code, rules) {
+async function validateBot(lang, code, rules, game) {
     if (validationsInFlight >= MAX_PARALLEL_VALIDATIONS) {
         throw new HttpError(429, 'Server đang kiểm tra nhiều bot, thử lại sau vài giây.');
     }
@@ -219,10 +278,10 @@ async function validateBot(lang, code, rules) {
     const probeId = `reg_${crypto.randomBytes(4).toString('hex')}`;
     let handler = null;
     try {
-        const prep = await runner.prepareBot(probeId, lang, code);
+        const prep = await runner.prepareBot(probeId, lang, code, { game });
         if (!prep.success) throw new HttpError(422, prep.error);
         handler = prep.botHandler;
-        const res = await matchplay.smokeTest(handler, rules);
+        const res = await matchplay.smokeTest(handler, rules, game);
         if (!res.ok) throw new HttpError(422, `Bot không chạy được: ${res.errors.join(' | ')}`);
     } finally {
         validationsInFlight--;
@@ -257,7 +316,7 @@ async function registerEntry(tid, input, user) {
     const dup = db.prepare('SELECT 1 FROM entries WHERE tournament_id = ? AND name = ? COLLATE NOCASE').get(tid, e.name);
     if (dup) throw new HttpError(409, `Tên "${e.name}" đã có người đăng ký`);
 
-    await validateBot(e.lang, e.code, tRules(t));
+    await validateBot(e.lang, e.code, tRules(t), gameOf(t));
 
     // re-check after the async validation (state may have changed meanwhile)
     const t2 = getTournamentRow(tid);
@@ -291,7 +350,7 @@ async function updateEntry(tid, entryId, user, token, input) {
         if (given.length !== real.length || !crypto.timingSafeEqual(given, real)) throw new HttpError(403, 'Sai mã chỉnh sửa');
     }
     const e = checkEntryInput({ name: entry.name, lang: input.lang || entry.lang, code: input.code });
-    await validateBot(e.lang, e.code, tRules(t));
+    await validateBot(e.lang, e.code, tRules(t), gameOf(t));
     db.prepare('UPDATE entries SET lang = ?, code = ? WHERE id = ?').run(e.lang, e.code, entryId);
     notifyUpdated(tid);
     return { id: entryId, name: entry.name, lang: e.lang };
@@ -342,19 +401,23 @@ function settleSeries(s, winnerId, loserId, status, by) {
     if (s.lose_next && loserId) putIntoSlot(s.lose_next, s.lose_next_slot, loserId);
 }
 
-function createKnockout(tid, ids, { bestOf, thirdPlace }) {
+function createKnockout(tid, ids, { bestOf, thirdPlace, groupOf }) {
     const n = ids.length;
     const size = nextPow2(n);
     const rounds = Math.log2(size);
     const order = seedOrder(size);
     const grid = [];
 
+    // round-one slots from the seeding; groupmates are pulled apart where possible (knockout after a group stage)
+    let slots = order.map(seed => ids[seed - 1] || null);
+    if (groupOf) slots = separateGroups(slots, groupOf);
+
     for (let r = 1; r <= rounds; r++) {
         const count = size / 2 ** r;
         grid.push([]);
         for (let slot = 0; slot < count; slot++) {
-            const a = r === 1 ? (ids[order[2 * slot] - 1] || null) : null;
-            const b = r === 1 ? (ids[order[2 * slot + 1] - 1] || null) : null;
+            const a = r === 1 ? slots[2 * slot] : null;
+            const b = r === 1 ? slots[2 * slot + 1] : null;
             grid[r - 1].push(addSeries(tid, { stage: 'bracket', round: r, slot, bestOf, a, b }));
         }
     }
@@ -459,7 +522,7 @@ function startTournament(tid, opts = {}) {
  * Once it has started only the name and the run-time knobs (show-mode delay, concurrency) can,
  * because games were already played under the old rules.
  */
-function updateTournament(tid, { name, format, config }) {
+function updateTournament(tid, { name, format, game, config }) {
     const t = getTournamentRow(tid);
     if (!t) throw new HttpError(404, 'Không tìm thấy giải đấu');
     const newName = name === undefined ? t.name : String(name || '').trim().slice(0, 80);
@@ -468,14 +531,21 @@ function updateTournament(tid, { name, format, config }) {
     if (t.status === 'registration') {
         const newFormat = format === undefined ? t.format : format;
         if (!FORMATS.includes(newFormat)) throw new HttpError(400, `Thể thức không hợp lệ (${FORMATS.join(', ')})`);
-        const cfg = config === undefined ? tConfig(t) : normalizeConfig(config, true);
-        db.prepare('UPDATE tournaments SET name = ?, format = ?, config_json = ? WHERE id = ?')
-            .run(newName, newFormat, JSON.stringify(cfg), tid);
+        const newGame = game === undefined ? t.game : String(game);
+        if (!games.has(newGame)) throw new HttpError(400, `Trò chơi không tồn tại (${games.list().map(g => g.id).join(', ')})`);
+        if (newGame !== t.game && db.prepare('SELECT 1 FROM entries WHERE tournament_id = ?').get(tid)) {
+            throw new HttpError(409, 'Đã có bot đăng ký (viết cho trò chơi cũ) — hãy xóa hết bot trước khi đổi trò chơi');
+        }
+        // rules left untouched when only the name changes; a different game needs its own rules
+        const cfg = config === undefined ? (newGame === t.game ? tConfig(t) : normalizeConfig({}, true, newGame)) : normalizeConfig(config, true, newGame);
+        db.prepare('UPDATE tournaments SET name = ?, format = ?, game = ?, config_json = ? WHERE id = ?')
+            .run(newName, newFormat, newGame, JSON.stringify(cfg), tid);
     } else {
         if (format !== undefined && format !== t.format) throw new HttpError(409, 'Giải đã bắt đầu, không thể đổi thể thức');
+        if (game !== undefined && game !== t.game) throw new HttpError(409, 'Giải đã bắt đầu, không thể đổi trò chơi');
         const cfg = tConfig(t);
         if (config) {
-            const touchesRules = config.rules !== undefined && JSON.stringify(normalizeConfig(config).rules) !== JSON.stringify(cfg.rules);
+            const touchesRules = config.rules !== undefined && JSON.stringify(normalizeConfig(config, false, t.game).rules) !== JSON.stringify(cfg.rules);
             if (touchesRules) throw new HttpError(409, 'Giải đã bắt đầu, không thể đổi luật chơi (các ván đã đấu theo luật cũ)');
             if (config.moveDelayMs !== undefined) cfg.moveDelayMs = clampInt(config.moveDelayMs, 0, 3000, cfg.moveDelayMs);
             if (config.concurrency !== undefined) cfg.concurrency = clampInt(config.concurrency, 1, 4, cfg.concurrency);
@@ -582,14 +652,15 @@ function advanceFromGroups(tid) {
     const cfg = tConfig(t);
     const standings = groupStandings(tid);
     const qualifiers = [];
-    for (const rows of Object.values(standings)) {
-        rows.slice(0, cfg.advance).forEach(r => qualifiers.push(r));
+    const groupOf = {};
+    for (const [g, rows] of Object.entries(standings)) {
+        rows.slice(0, cfg.advance).forEach(r => { qualifiers.push(r); groupOf[r.entryId] = Number(g); });
     }
     // best group winners first, then runners-up ... -> standard bracket seeding keeps groupmates apart early
     qualifiers.sort((x, y) =>
         x.rank - y.rank || y.points - x.points || y.gameDiff - x.gameDiff || y.gamesWon - x.gamesWon || x.seed - y.seed);
     db.transaction(() => {
-        createKnockout(tid, qualifiers.map(q => q.entryId), { bestOf: cfg.bestOf, thirdPlace: cfg.thirdPlace });
+        createKnockout(tid, qualifiers.map(q => q.entryId), { bestOf: cfg.bestOf, thirdPlace: cfg.thirdPlace, groupOf });
     })();
 }
 
@@ -599,13 +670,26 @@ function maybeFinish(tid) {
     const open = db.prepare(`SELECT COUNT(*) AS n FROM series WHERE tournament_id = ? AND status NOT IN ('done','bye')`).get(tid).n;
     if (open > 0) return false;
 
+    // Round robin: if the table is STILL level at the top after every tie-break, play it out instead of
+    // letting the seed decide. (Mini knockout between the tied teams, same series length as a knockout.)
+    if (t.format === 'round_robin' && !db.prepare(`SELECT 1 FROM series WHERE tournament_id = ? AND stage = 'bracket'`).get(tid)) {
+        const top = (groupStandings(tid)[0] || []);
+        const tied = top.filter(r => r.rank === 1 || (r.tied_unresolved && top[0] && r.points === top[0].points
+            && r.gameDiff === top[0].gameDiff && r.gamesWon === top[0].gamesWon && r.h2h === top[0].h2h));
+        if (top[0] && top[0].tied_unresolved && tied.length >= 2) {
+            db.transaction(() => {
+                createKnockout(tid, tied.map(r => r.entryId), { bestOf: tConfig(t).bestOf, thirdPlace: false });
+            })();
+            return false;                                   // the playoff series are now 'ready'
+        }
+    }
+
     let champion = null;
-    if (t.format === 'round_robin') {
+    const final = db.prepare(`SELECT winner_entry FROM series WHERE tournament_id = ? AND stage = 'bracket' AND win_next IS NULL`).get(tid);
+    if (final) champion = final.winner_entry;
+    else if (t.format === 'round_robin') {
         const st = groupStandings(tid);
         champion = st[0] && st[0][0] ? st[0][0].entryId : null;
-    } else {
-        const final = db.prepare(`SELECT winner_entry FROM series WHERE tournament_id = ? AND stage = 'bracket' AND win_next IS NULL`).get(tid);
-        champion = final ? final.winner_entry : null;
     }
     db.prepare(`UPDATE tournaments SET status = 'finished', champion_entry_id = ?, finished_at = ?, auto_run = 0 WHERE id = ?`)
         .run(champion, Date.now(), tid);
@@ -623,7 +707,7 @@ const handlers = new Map();   // entryId -> handler
 
 async function ensureHandler(tid, entry) {
     if (handlers.has(entry.id)) return handlers.get(entry.id);
-    const prep = await runner.prepareBot(`t${tid}_e${entry.id}`, entry.lang, entry.code);
+    const prep = await runner.prepareBot(`t${tid}_e${entry.id}`, entry.lang, entry.code, { game: gameOf(getTournamentRow(tid)) });
     if (!prep.success) return null;
     handlers.set(entry.id, prep.botHandler);
     return prep.botHandler;
@@ -692,6 +776,7 @@ async function playSeries(tid, seriesId, ctl) {
             ctl.signals.add(signal);
 
             const result = await matchplay.playMatch({
+                game: gameOf(t),
                 blue: { name: blue.entry.name, lang: blue.entry.lang, handler: blue.handler },
                 red: { name: red.entry.name, lang: red.entry.lang, handler: red.handler },
                 rules,
@@ -736,7 +821,7 @@ async function playSeries(tid, seriesId, ctl) {
             try {
                 matchId = db.transaction(() => {
                     const id = saveMatch({
-                        kind: 'tournament', tournamentId: tid, seriesId, gameNo,
+                        game: t.game, kind: 'tournament', tournamentId: tid, seriesId, gameNo,
                         blue: { name: blue.entry.name, lang: blue.entry.lang, entryId: blue.entry.id, userId: blue.entry.user_id },
                         red: { name: red.entry.name, lang: red.entry.lang, entryId: red.entry.id, userId: red.entry.user_id },
                         winner: result.winner, reason: result.reason, rules, durationMs: result.durationMs
@@ -821,7 +906,7 @@ function run(tid, mode = 'all') {
         .finally(() => {
             loops.delete(tid);
             const cur = getTournamentRow(tid);
-            if (cur && ctl.stop) db.prepare('UPDATE tournaments SET auto_run = 0 WHERE id = ?').run(tid);
+            if (cur && ctl.stop && !ctl.shuttingDown) db.prepare('UPDATE tournaments SET auto_run = 0 WHERE id = ?').run(tid);
             notifyUpdated(tid);
         });
     notifyUpdated(tid);
@@ -835,6 +920,20 @@ function pause(tid) {
     ctl.stop = true;
     ctl.signals.forEach(sig => { sig.aborted = true; });
     return { paused: true };
+}
+
+/**
+ * Server is going down: stop every scheduler but KEEP auto_run, so recoverOnBoot() resumes them.
+ * Unfinished games are discarded (series return to 'ready').
+ */
+async function shutdown(maxWaitMs = 6000) {
+    for (const ctl of loops.values()) {
+        ctl.shuttingDown = true;
+        ctl.stop = true;
+        ctl.signals.forEach(sig => { sig.aborted = true; });
+    }
+    const t0 = Date.now();
+    while (loops.size && Date.now() - t0 < maxWaitMs) await matchplay.sleep(50);
 }
 
 function deleteTournament(tid) {
@@ -861,7 +960,7 @@ function recoverOnBoot() {
 
 function listTournaments() {
     return db.prepare(`
-        SELECT t.id, t.name, t.format, t.status, t.created_at AS createdAt, t.started_at AS startedAt,
+        SELECT t.id, t.name, t.format, t.game, t.status, t.created_at AS createdAt, t.started_at AS startedAt,
                t.finished_at AS finishedAt,
                (SELECT COUNT(*) FROM entries e WHERE e.tournament_id = t.id) AS entryCount,
                (SELECT name FROM entries e WHERE e.id = t.champion_entry_id) AS champion
@@ -900,6 +999,7 @@ function getTournamentDetail(tid) {
     return {
         tournament: {
             id: t.id, name: t.name, format: t.format, status: t.status, config: tConfig(t),
+            game: (({ id, name, short, movesHaveFrom, botHint }) => ({ id, name, short, movesHaveFrom, botHint }))(gameOf(t)),
             autoRun: !!t.auto_run, running: loops.has(tid),
             rules: tRules(t),
             champion: ref(t.champion_entry_id),
@@ -914,9 +1014,9 @@ function getTournamentDetail(tid) {
 
 module.exports = {
     // pure
-    nextPow2, seedOrder, roundRobinRounds, snakeGroups, computeStandings, decideSeries, normalizeConfig,
+    nextPow2, seedOrder, separateGroups, roundRobinRounds, snakeGroups, computeStandings, decideSeries, normalizeConfig,
     // manager
     setIO, HttpError, createTournament, updateTournament, resetSeries, setSeriesResult, registerEntry, updateEntry, removeEntry, startTournament,
-    run, pause, deleteTournament, recoverOnBoot, listTournaments, getTournamentDetail,
+    run, pause, shutdown, deleteTournament, recoverOnBoot, listTournaments, getTournamentDetail,
     liveForTournament, liveGameCount
 };

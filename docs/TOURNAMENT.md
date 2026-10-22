@@ -26,9 +26,9 @@ Nguyên tắc: **server giữ bàn cờ (authoritative)**. Bot chỉ nhận snap
 npm install
 ADMIN_KEY=matkhau_cua_ban npm start      # Windows PowerShell:  $env:ADMIN_KEY="..."; npm start
 # mở  http://localhost:3000/arena.html
-npm test                                  # 49 test (unit + end-to-end + bot tấn công)
+npm test                                  # 76 test: unit, end-to-end, bot tấn công, nginx thật
 ```
-Không đặt `ADMIN_KEY` → server tự sinh khóa và in ra console (đổi mỗi lần chạy). Đăng nhập rồi bấm 🔑 nhập khóa một lần để tài khoản thành admin (xem `docs/ACCOUNTS.md`).
+Không đặt `ADMIN_KEY` → server tự sinh khóa và in ra console (đổi mỗi lần chạy). Chỉ tài khoản admin được cấp sẵn mới đăng nhập quản trị được.
 Biến môi trường khác: `PORT`, `DB_PATH` (mặc định `data/ott.db`), `PYTHON_CMD`.
 
 ## 3. Lịch sử & xem lại trận (#3)
@@ -48,9 +48,10 @@ Biến môi trường khác: `PORT`, `DB_PATH` (mặc định `data/ott.db`), `P
 
 - **Cặp đấu (series)** = best-of-N ván, **đổi bên Xanh/Đỏ mỗi ván** (Xanh đi trước nên có lợi thế; với bot giống nhau Xanh luôn thắng). Chốt sớm khi một bên đủ số ván thắng.
 - Knockout hòa sau N ván → đấu thêm tối đa 4 ván "cái chết đột ngột"; vẫn hòa → bên có seed tốt hơn đi tiếp.
-- Vòng bảng: thắng cặp 3đ, hòa 1đ; xếp theo điểm → hiệu số ván → số ván thắng → seed. (Đồng điểm hoàn toàn thì xét seed, chưa có trận playoff.)
+- Vòng bảng: thắng cặp 3đ, hòa 1đ; xếp theo điểm → hiệu số ván → số ván thắng → **đối đầu trực tiếp** → seed. Thể thức vòng tròn mà bảng vẫn đồng hạng hoàn toàn ở ngôi đầu thì **tự đá playoff** giữa các đội đó (loại trực tiếp, số ván như knockout) thay vì để seed quyết định.
+- Sau vòng bảng, khi xếp nhánh knockout những đội cùng bảng được **tách ra khỏi nhau ở vòng đầu** (trường hợp 4 bảng đi tiếp 2 trước đây ra toàn các cặp cùng bảng).
 - Đăng ký bằng **tài khoản** (mặc định; `requireLogin:false` cho giải mở): tên thi đấu = tên tài khoản, 1 bot/tài khoản, tự sửa/rút bot đến khi admin chốt. Server **biên dịch + chạy thử bot** trên thế cờ khởi đầu và từ chối kèm lý do nếu lỗi (trước đây lỗi chỉ lộ ra khi bot âm thầm đi ngẫu nhiên suốt giải). Giải mở (không cần đăng nhập) dùng `editToken` lưu trong trình duyệt.
-- Admin (header `X-Admin-Key`, giao diện nút 🔑): tạo giải, chốt & bắt đầu (seed theo **Elo** / thứ tự đăng ký / ngẫu nhiên / thủ công qua API), **chạy toàn bộ**, **chạy 1 cặp**, **tạm dừng**, xóa bot, xóa giải.
+- Admin (tài khoản có role `admin`): tạo giải, chốt & bắt đầu (seed theo **Elo** / thứ tự đăng ký / ngẫu nhiên / thủ công qua API), **chạy toàn bộ**, **chạy 1 cặp**, **tạm dừng**, xóa bot, xóa giải.
 - Chế độ trình diễn: `moveDelayMs` 300–500 để khán giả xem từng nước; ván đang chạy phát qua Socket.io cho mọi người xem (người vào muộn nhận snapshot).
 - Bền vững: ván chỉ ghi DB khi kết thúc; tạm dừng hoặc server sập → cặp đang dở quay về `ready`, các ván đã xong giữ nguyên; khởi động lại tự chạy tiếp giải đang `auto_run`.
 
@@ -77,11 +78,16 @@ Socket.io: client gửi `watch_tournament(id)` → nhận `live_snapshot`, `live
 - `runner.js`: wrapper JS giờ có đủ `helpers` như README (`simulateMove`, `getLegalMoves`…), `log()` thật; Python dùng `python3` trên Linux/macOS (`PYTHON_CMD` để đổi); dọn `temp_bots` khi khởi động.
 - `logic.js` / `index.html`: link sang Giải đấu/Lịch sử, upload trận luyện tập, nút "Xem lại trận này".
 
-## 8. Còn lại (theo thứ tự ưu tiên)
+## 8. Còn lại
 
-1. **#6 Trò chơi khác:** `engine.js` đã tách khỏi server nên có thể thêm engine thứ hai cùng giao diện `getLegalMoves/applyMove/checkWin`; cần trừu tượng hóa phần trạng thái gửi cho bot và bộ xem replay.
-2. Giới hạn tài nguyên *tổng* bằng cgroup (hiện giới hạn theo từng tiến trình bot) — xem `SECURITY.md` §5.
-3. Mở rộng trình soạn luật: kích thước bàn, bảng khắc chế (engine đã nhận `rows/cols/beats`).
-4. Dọn repo: `git rm -r --cached node_modules temp_bots` (đã có `.gitignore`).
+Tất cả hạng mục trong danh sách ban đầu và các việc tồn đọng đã xong. Những điều **chưa làm / chưa kiểm chứng**, nói thẳng:
 
-Đã xong: #1 Ace/ngôn ngữ, #2 tài khoản (`ACCOUNTS.md`), #3 lịch sử & replay, #4 quản trị (`ADMIN.md`), #5 giải đấu, sandbox (`SECURITY.md`).
+1. Phòng đấu **Online** và luyện tập ở `index.html` vẫn chỉ có RPS (giải đấu/lịch sử/replay thì đủ hai trò) — xem `GAMES.md`.
+2. Giới hạn RAM/CPU áp theo **từng tiến trình bot**; có trần *tổng* số tiến trình (`MAX_BOT_PROCS`) nhưng chưa có cgroup tổng (`SECURITY.md` §5).
+3. **Docker/compose chưa được build** (môi trường phát triển không có Docker); nginx đã test thật, Caddy và systemd thì chưa (`DEPLOY.md`).
+4. Chưa chạy thử trên **Windows/macOS** (nhất là tầng sandbox cơ bản và biên dịch C++).
+5. Điểm Elo cũ theo tên (trước khi có tài khoản) không được chuyển; Elo chỉ tính từ trận Online RPS giữa hai tài khoản.
+6. Playoff khi hòa ở ranh giới *đi tiếp* của vòng bảng (hạng 2–3 đồng hạng hoàn toàn) vẫn do seed quyết định; chỉ ngôi đầu vòng tròn mới có playoff.
+7. Dọn repo: `npm run cleanup-repo` (bỏ 1.190 tệp `node_modules`/`temp_bots` khỏi git).
+
+Đã xong: #1 Ace/ngôn ngữ, #2 tài khoản (`ACCOUNTS.md`), #3 lịch sử & replay, #4 quản trị (`ADMIN.md`), #5 giải đấu, sandbox (`SECURITY.md`), mạng & vận hành (`DEPLOY.md`), #6 nhiều trò chơi (`GAMES.md`).

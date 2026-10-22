@@ -38,10 +38,10 @@ const DEFAULT_RULES = Object.freeze({
 function resolveRules(overrides) {
     const o = overrides || {};
     return {
-        rows: o.rows || DEFAULT_RULES.rows,
-        cols: o.cols || DEFAULT_RULES.cols,
-        blueGoal: o.blueGoal || DEFAULT_RULES.blueGoal,
-        redGoal: o.redGoal || DEFAULT_RULES.redGoal,
+        rows: o.rows || o.size || DEFAULT_RULES.rows,
+        cols: o.cols || o.size || DEFAULT_RULES.cols,
+        blueGoal: o.blueGoal || ((o.rows || o.size) ? { r: 0, c: (o.cols || o.size) - 1 } : DEFAULT_RULES.blueGoal),
+        redGoal: o.redGoal || ((o.rows || o.size) ? { r: (o.rows || o.size) - 1, c: 0 } : DEFAULT_RULES.redGoal),
         beats: o.beats || DEFAULT_RULES.beats,
         maxPlies: o.maxPlies || DEFAULT_RULES.maxPlies,
         moveTimeoutMs: o.moveTimeoutMs || DEFAULT_RULES.moveTimeoutMs,
@@ -206,42 +206,72 @@ const PIECE_TYPES = ['rock', 'paper', 'scissors'];
 const MAX_PIECES_PER_SIDE = 30;
 
 /**
- * Validates admin-supplied rule overrides (issue #4). Pure; used by the API and by the editor.
- * Accepts: maxPlies, moveTimeoutMs, timeBankMs, blueGoal, redGoal, setup {p1:[{r,c,t}], p2:[...]}.
- * The board stays 9x9 (the bot helpers and the editor assume it).
+ * Validates admin-supplied rule overrides (issue #4).  Pure; used by the API and by the editor.
+ * Accepts: size (square board 5-15), maxPlies, moveTimeoutMs, timeBankMs, blueGoal, redGoal,
+ *          beats {rock:[..],paper:[..],scissors:[..]}, setup {p1:[{r,c,t}], p2:[...]}.
  * Returns { ok, errors:[...], rules } where `rules` holds ONLY the validated overrides.
  */
 function validateRules(raw) {
     const errors = [];
     const out = {};
     const o = raw && typeof raw === 'object' ? raw : {};
-    const R = DEFAULT_RULES.rows, C = DEFAULT_RULES.cols;
     const isInt = (v) => Number.isInteger(v);
-    const inBoard = (p) => p && isInt(p.r) && isInt(p.c) && p.r >= 0 && p.r < R && p.c >= 0 && p.c < C;
 
     const intIn = (key, min, max, label, allowZero) => {
-        if (o[key] === undefined || o[key] === null || o[key] === '') return;
+        if (o[key] === undefined || o[key] === null || o[key] === '') return undefined;
         const v = Number(o[key]);
         if (!isInt(v) || (!(allowZero && v === 0) && (v < min || v > max))) {
             errors.push(`${label} phải là số nguyên từ ${min} đến ${max}${allowZero ? ' (hoặc 0 = không giới hạn)' : ''}`);
-        } else out[key] = v;
+            return undefined;
+        }
+        out[key] = v;
+        return v;
     };
+
+    // ---- board size ----
+    const size = intIn('size', 5, 15, 'Cỡ bàn cờ') || DEFAULT_RULES.rows;
+    const customSize = size !== DEFAULT_RULES.rows;
+    const R = size, C = size;
+    const inBoard = (p) => p && isInt(p.r) && isInt(p.c) && p.r >= 0 && p.r < R && p.c >= 0 && p.c < C;
+    const note = (r, c) => `${String.fromCharCode(65 + c)}${R - r}`;
+
     intIn('maxPlies', 20, 2000, 'Giới hạn số nước đi');
     intIn('moveTimeoutMs', 100, 10000, 'Thời gian tối đa mỗi nước (ms)');
     intIn('timeBankMs', 1000, 3600000, 'Tổng thời gian suy nghĩ mỗi bên (ms)', true);
 
+    // ---- who beats whom ----
+    if (o.beats !== undefined && o.beats !== null) {
+        const beats = {};
+        let relations = 0;
+        if (typeof o.beats !== 'object' || Array.isArray(o.beats)) errors.push('Bảng khắc chế không hợp lệ');
+        else {
+            for (const t of PIECE_TYPES) {
+                const list = o.beats[t] === undefined ? [] : o.beats[t];
+                if (!Array.isArray(list) || list.some(x => !PIECE_TYPES.includes(x))) { errors.push(`Bảng khắc chế của ${t} không hợp lệ`); continue; }
+                if (list.includes(t)) errors.push(`${t} không thể tự khắc chế chính nó`);
+                beats[t] = [...new Set(list)].filter(x => x !== t);
+                relations += beats[t].length;
+            }
+            if (!errors.length && relations === 0) errors.push('Cần ít nhất một quan hệ khắc chế (nếu không thì không ai bắt được quân nào)');
+            if (!errors.length) out.beats = beats;
+        }
+    }
+
+    // ---- goals (default: opposite corners of the chosen board) ----
+    const defaultBlue = { r: 0, c: C - 1 }, defaultRed = { r: R - 1, c: 0 };
     for (const key of ['blueGoal', 'redGoal']) {
         if (o[key] === undefined || o[key] === null) continue;
         if (!inBoard(o[key])) errors.push(`Ô đích ${key === 'blueGoal' ? 'Xanh' : 'Đỏ'} nằm ngoài bàn cờ`);
         else out[key] = { r: o[key].r, c: o[key].c };
     }
+    const blueGoal = out.blueGoal || defaultBlue;
+    const redGoal = out.redGoal || defaultRed;
+    if (blueGoal.r === redGoal.r && blueGoal.c === redGoal.c) errors.push('Hai ô đích không được trùng nhau');
 
+    // ---- starting position ----
     if (o.setup !== undefined && o.setup !== null) {
         const setup = { p1: [], p2: [] };
         const used = new Map();
-        const blueGoal = out.blueGoal || DEFAULT_RULES.blueGoal;
-        const redGoal = out.redGoal || DEFAULT_RULES.redGoal;
-        if (blueGoal.r === redGoal.r && blueGoal.c === redGoal.c) errors.push('Hai ô đích không được trùng nhau');
         for (const [key, label] of [['p1', 'Xanh'], ['p2', 'Đỏ']]) {
             const list = o.setup[key];
             if (!Array.isArray(list) || list.length === 0) { errors.push(`Đội ${label} cần ít nhất 1 quân`); continue; }
@@ -249,9 +279,9 @@ function validateRules(raw) {
             for (const p of list) {
                 if (!inBoard(p) || !PIECE_TYPES.includes(p.t)) { errors.push(`Quân của đội ${label} có tọa độ hoặc loại không hợp lệ`); continue; }
                 const k = `${p.r},${p.c}`;
-                if (used.has(k)) { errors.push(`Hai quân chồng lên nhau tại ô ${toNotation(p.r, p.c)}`); continue; }
+                if (used.has(k)) { errors.push(`Hai quân chồng lên nhau tại ô ${note(p.r, p.c)}`); continue; }
                 if ((p.r === blueGoal.r && p.c === blueGoal.c) || (p.r === redGoal.r && p.c === redGoal.c)) {
-                    errors.push(`Không được đặt quân lên ô đích (${toNotation(p.r, p.c)})`); continue;
+                    errors.push(`Không được đặt quân lên ô đích (${note(p.r, p.c)})`); continue;
                 }
                 used.set(k, key);
                 setup[key].push({ r: p.r, c: p.c, t: p.t });
@@ -259,23 +289,25 @@ function validateRules(raw) {
         }
         if (!errors.length) {
             // the starting position must be a playable game: nobody has won yet and both sides can move
-            const probe = resolveRules({ ...out, setup });
+            const probe = resolveRules({ ...out, size, blueGoal, redGoal, setup });
             const board = createInitialBoard(probe);
             if (checkWin(board, probe).winner !== null) errors.push('Thế cờ xuất phát đã phân thắng bại');
             else if (!getLegalMoves(1, board, probe).length || !getLegalMoves(2, board, probe).length) {
                 errors.push('Mỗi bên phải có ít nhất một nước đi ngay từ đầu');
             } else out.setup = setup;
         }
+    } else if (customSize) {
+        errors.push('Đã đổi cỡ bàn: hãy tự thiết lập thế cờ xuất phát (thế cờ mặc định chỉ dành cho bàn 9×9)');
     } else if (out.blueGoal || out.redGoal) {
         // goals changed but setup is the default: default pieces must not sit on the new goal cells
-        const bg = out.blueGoal || DEFAULT_RULES.blueGoal, rg = out.redGoal || DEFAULT_RULES.redGoal;
-        if (bg.r === rg.r && bg.c === rg.c) errors.push('Hai ô đích không được trùng nhau');
         for (const p of [...DEFAULT_RULES.setup.p1, ...DEFAULT_RULES.setup.p2]) {
-            if ((p.r === bg.r && p.c === bg.c) || (p.r === rg.r && p.c === rg.c)) {
-                errors.push(`Ô đích trùng quân xuất phát mặc định (${toNotation(p.r, p.c)}) — hãy tự thiết lập thế cờ`); break;
+            if ((p.r === blueGoal.r && p.c === blueGoal.c) || (p.r === redGoal.r && p.c === redGoal.c)) {
+                errors.push(`Ô đích trùng quân xuất phát mặc định (${note(p.r, p.c)}) — hãy tự thiết lập thế cờ`); break;
             }
         }
     }
+    if (customSize && !out.blueGoal) out.blueGoal = defaultBlue;       // explicit, so stored rules never depend on defaults
+    if (customSize && !out.redGoal) out.redGoal = defaultRed;
     return { ok: errors.length === 0, errors, rules: out };
 }
 

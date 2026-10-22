@@ -91,7 +91,7 @@ test('registration rejects a broken bot with a readable reason', async () => {
     assert.strictEqual(dup.status, 409);
     // code & tokens never leak
     const detail = (await call('GET', `/api/tournaments/${id}`)).json;
-    assert.ok(!JSON.stringify(detail).includes('getNextMove'));
+    assert.ok(!JSON.stringify(detail).includes('randomChoice'), 'submitted source code must never be exposed');   // a snippet only the submitted bot contains
     assert.ok(!JSON.stringify(detail).includes(ok.json.editToken));
 });
 

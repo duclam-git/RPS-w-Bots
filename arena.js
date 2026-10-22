@@ -2,11 +2,15 @@
 (function () {
     'use strict';
 
+    // Keep protected views hidden until the session has been checked.
+    document.documentElement.style.visibility = 'hidden';
+
     // ---------- helpers ----------
     const $ = (sel, el = document) => el.querySelector(sel);
     const view = $('#view');
     const EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
     const DEFAULT_GOALS = { blue: { r: 0, c: 8 }, red: { r: 8, c: 0 } };
+    const gameBadge = (id) => `<span class="badge game" title="${esc((GAMES[id] && GAMES[id].name) || id)}">${esc((GAMES[id] && GAMES[id].short) || id)}</span>`;
     const FORMAT_LABEL = {
         single_elim: 'Loại trực tiếp (nhánh đấu)',
         round_robin: 'Vòng tròn (một bảng)',
@@ -33,6 +37,7 @@
 
     // ---------- accounts & admin ----------
     // Logged-in state lives in an HttpOnly session cookie; the page only learns it through /api/auth/me.
+    let GAMES = {};         // id -> { id, name, short, description, botHint }  (from /api/games)
     let me = null;          // { id, username, role, elo, ... } or null
     let isAdmin = false;
 
@@ -103,12 +108,16 @@
             await refreshMe();
             toast(authMode === 'login' ? `Xin chào, ${me.username}!` : `Đã tạo tài khoản ${me.username}`);
             route();
-        } catch (e) { $('#auth-msg').textContent = 'Lỗi: ' + e.message; if (e.status === 403) { $('#auth-admin-key-wrap').hidden = false; $('#auth-admin-key').required = true; $('#auth-admin-key').focus(); } }
+        } catch (e) {
+            $('#auth-msg').textContent = '❌ ' + e.message;
+            if (e.status === 403) { $('#auth-admin-key-wrap').hidden = false; $('#auth-admin-key').required = true; $('#auth-admin-key').focus(); }
+        }
         finally { btn.disabled = false; }
     }
     $('#auth-submit').addEventListener('click', submitAuth);
     $('#auth-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth(); });
     $('#auth-user').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#auth-pass').focus(); });
+
     $('#user-btn').addEventListener('click', () => { if (me) location.hash = `#/profile/${encodeURIComponent(me.username)}`; else openAuth('login'); });
     $('#logout-btn').addEventListener('click', async () => {
         try { await api('POST', '/api/auth/logout'); } catch (e) { }
@@ -145,7 +154,7 @@
     // ---------- board rendering ----------
     function boardHTML(board, opts = {}) {
         const size = opts.size || 'md';
-        const goals = opts.goals || DEFAULT_GOALS;
+        const goals = 'goals' in opts ? opts.goals : DEFAULT_GOALS;      // null = a game without goal squares
         const last = opts.last || null;
         const rows = board.length;
         const cols = board[0].length;
@@ -154,13 +163,13 @@
             for (let c = 0; c < cols; c++) {
                 const p = board[r][c];
                 let cls = 'c ' + ((r + c) % 2 ? 'd' : 'l');
-                if (goals.blue.r === r && goals.blue.c === c) cls += ' gb';
-                if (goals.red.r === r && goals.red.c === c) cls += ' gr';
+                if (goals && goals.blue.r === r && goals.blue.c === c) cls += ' gb';
+                if (goals && goals.red.r === r && goals.red.c === c) cls += ' gr';
                 if (last) {
-                    if (last.from.r === r && last.from.c === c) cls += ' from';
+                    if (last.from && last.from.r === r && last.from.c === c) cls += ' from';    // placement games have no 'from'
                     if (last.to.r === r && last.to.c === c) cls += ' to' + (last.capture ? ' cap' : '');
                 }
-                cells += `<div class="${cls}" data-r="${r}" data-c="${c}">${p ? `<span class="pc p${p.player}">${EMOJI[p.type] || '?'}</span>` : ''}</div>`;
+                cells += `<div class="${cls}" data-r="${r}" data-c="${c}">${p ? (p.type === 'stone' ? `<span class="pc stone p${p.player}"></span>` : `<span class="pc p${p.player}">${EMOJI[p.type] || '?'}</span>`) : ''}</div>`;
             }
         }
         let ranks = '';
@@ -168,13 +177,21 @@
         let files = '';
         for (let c = 0; c < cols; c++) files += `<span>${String.fromCharCode(65 + c)}</span>`;
         const axes = opts.axes !== false && size !== 'sm';
-        return `<div class="bd-wrap ${size}" style="--cols:${cols}">
+        // cells shrink as the board grows (15x15 Caro, 19x19...) and on narrow screens
+        const base = { lg: 54, md: 46, sm: 26 }[size] || 46;
+        const room = { lg: 640, md: 560, sm: 270 }[size] || 560;
+        const cell = Math.max(14, Math.min(base, Math.floor(room / cols)));
+        return `<div class="bd-wrap ${size}" style="--cols:${cols};--cell:min(${cell}px, calc((100vw - 5rem) / ${cols}))">
             <div class="bd-row">${axes ? `<div class="rank-axis">${ranks}</div>` : ''}<div class="bd">${cells}</div></div>
             ${axes ? `<div class="axis">${files}</div>` : ''}</div>`;
     }
 
     const cloneBoard = (b) => b.map(row => row.map(x => (x ? { player: x.player, type: x.type } : null)));
-    function applyMoveTo(board, m) { board[m.to.r][m.to.c] = board[m.from.r][m.from.c]; board[m.from.r][m.from.c] = null; }
+    // Games where pieces move have m.from; placement games (Caro) put a new stone on m.to
+    function applyMoveTo(board, m) {
+        if (m.from) { board[m.to.r][m.to.c] = board[m.from.r][m.from.c]; board[m.from.r][m.from.c] = null; }
+        else board[m.to.r][m.to.c] = { player: m.player, type: 'stone' };
+    }
     const notation = (p, rows = 9) => `${String.fromCharCode(65 + p.c)}${rows - p.r}`;
 
     // ---------- router ----------
@@ -218,7 +235,7 @@
                 ${list.length ? `<div class="t-list">${list.map(t => `
                     <a class="t-item" href="#/tournament/${t.id}">
                         <div class="row between"><h3>${esc(t.name)}</h3><span class="badge ${t.status}">${STATUS_LABEL[t.status]}</span></div>
-                        <div class="muted small">${FORMAT_LABEL[t.format] || t.format}</div>
+                        <div class="muted small">${gameBadge(t.game)} ${FORMAT_LABEL[t.format] || t.format}</div>
                         <div class="small" style="margin-top:.4rem">👥 ${t.entryCount} bot${t.champion ? ` · 🥇 <strong>${esc(t.champion)}</strong>` : ''}</div>
                         <div class="muted small">${fmtTime(t.createdAt)}</div>
                     </a>`).join('')}</div>`
@@ -268,14 +285,14 @@
             <div class="sc-foot"><span>BO${s.bestOf} · ${status}</span>${s.draws ? `<span>(${s.draws} hòa)</span>` : ''}${games}</div>${seriesAdminHTML(s)}</div>`;
     }
 
-    function bracketHTML(series) {
+    function bracketHTML(series, format) {
         const ko = series.filter(s => s.stage === 'bracket');
         if (!ko.length) return '';
         const total = Math.max(...ko.map(s => s.round));
         const rounds = [];
         for (let r = 1; r <= total; r++) rounds.push(ko.filter(s => s.round === r).sort((a, b) => a.slot - b.slot));
         const third = series.find(s => s.stage === 'third_place');
-        return `<div class="card"><h2>🏆 Nhánh đấu</h2><div class="bracket">
+        return `<div class="card"><h2>${format === 'round_robin' ? '⚔️ Playoff tranh ngôi đầu (bảng xếp hạng đồng hạng hoàn toàn)' : '🏆 Nhánh đấu'}</h2><div class="bracket">
             ${rounds.map((list, i) => `<div class="b-round"><div class="b-title">${roundName(i + 1, total)}</div>${list.map(seriesCardHTML).join('')}</div>`).join('')}
             </div>${third ? `<h3 style="margin-top:.6rem">🥉 Tranh hạng 3</h3><div style="max-width:260px">${seriesCardHTML(third)}</div>` : ''}</div>`;
     }
@@ -297,7 +314,7 @@
                     <td class="num">${r.played}</td><td class="num">${r.won}</td><td class="num">${r.tied}</td><td class="num">${r.lost}</td>
                     <td class="num">${r.gameDiff > 0 ? '+' : ''}${r.gameDiff}</td><td class="num"><strong>${r.points}</strong></td></tr>`).join('')}
                 </tbody></table></div>
-                <p class="muted small" style="margin:.4rem 0">Thắng cặp = 3đ · hòa = 1đ · xếp theo điểm → hiệu số ván → số ván thắng → seed</p>
+                <p class="muted small" style="margin:.4rem 0">Thắng cặp = 3đ · hòa = 1đ · xếp theo điểm → hiệu số ván → số ván thắng → đối đầu trực tiếp → seed</p>
                 <details><summary class="small"><strong>Lịch thi đấu (${fixtures.length} cặp)</strong></summary>
                 ${fixtures.map(s => `<div class="small" style="padding:.25rem 0;border-bottom:1px solid var(--line)">
                     <span class="muted">V${s.round}</span> ${s.a ? esc(s.a.name) : '?'} <strong class="mono">${s.gamesPlayed ? `${s.winsA}–${s.winsB}` : 'vs'}</strong> ${s.b ? esc(s.b.name) : '?'}
@@ -333,9 +350,9 @@
                 <div class="row between" style="margin-bottom:.8rem">
                     <div><a href="#/tournaments" class="small">← Tất cả giải đấu</a>
                         <h1>${esc(t.name)}</h1>
-                        <div class="muted small">${FORMAT_LABEL[t.format] || t.format} · ${data.entries.length} bot
+                        <div class="muted small">${gameBadge(t.game.id)} ${esc(t.game.name)} · ${FORMAT_LABEL[t.format] || t.format} · ${data.entries.length} bot
                         ${t.format !== 'round_robin' && t.format !== 'single_elim' ? ` · ${t.config.groupCount} bảng, đi tiếp ${t.config.advance}` : ''}
-                        · KO BO${t.config.bestOf} · hòa sau ${t.rules.maxPlies} nước · ${t.rules.moveTimeoutMs}ms/nước${t.rules.timeBankMs ? ` · tổng ${Math.round(t.rules.timeBankMs / 1000)}s/bên` : ''}${t.config.rules.setup ? ' · thế cờ tùy chỉnh' : ''}</div></div>
+                        · KO BO${t.config.bestOf} · hòa sau ${t.rules.maxPlies} nước · ${t.rules.moveTimeoutMs}ms/nước${t.rules.timeBankMs ? ` · tổng ${Math.round(t.rules.timeBankMs / 1000)}s/bên` : ''}${t.game.id === 'rps' && t.config.rules.setup ? ' · thế cờ tùy chỉnh' : ''}${t.game.id === 'rps' && t.rules.rows !== 9 ? ` · bàn ${t.rules.rows}×${t.rules.cols}` : ''}${t.game.id === 'caro' ? ` · bàn ${t.rules.rows}×${t.rules.cols}, ${t.rules.winLength} quân thắng` : ''}</div></div>
                     <span class="badge ${t.status}">${t.running ? '⚡ ' : ''}${STATUS_LABEL[t.status]}</span>
                 </div>
                 ${t.champion ? `<div class="champion">🥇 Vô địch: ${esc(t.champion.name)}</div>` : ''}
@@ -363,7 +380,7 @@
                     ${isAdmin && t.status === 'registration' ? `<td><button class="btn btn-sm btn-danger" data-act="remove" data-eid="${e.id}">✖</button></td>` : ''}</tr>`).join('')}
                 </tbody></table></div>` : '<p class="muted">Chưa có ai đăng ký.</p>'}</div>`;
 
-            body.innerHTML = (t.status === 'registration' ? entriesCard : '') + groupsHTML(data) + bracketHTML(data.series) + (t.status !== 'registration' ? entriesCard : '');
+            body.innerHTML = (t.status === 'registration' ? entriesCard : '') + groupsHTML(data) + bracketHTML(data.series, data.tournament.format) + (t.status !== 'registration' ? entriesCard : '');
             drawLive();
         }
 
@@ -385,7 +402,7 @@
             const updating = !!mine;
 
             reg.innerHTML = `<div class="card"><h2>📝 ${updating ? 'Bot của bạn trong giải' : 'Đăng ký tham gia'}</h2>
-                <p class="muted small" style="margin-bottom:.6rem">Nộp bot (JavaScript / Python / C++) với hàm <code>getNextMove(state, helpers, log)</code>. Server biên dịch và chạy thử bot trước khi nhận.
+                <p class="muted small" style="margin-bottom:.6rem">Trò chơi: <strong>${esc(t.game.name)}</strong>. Nộp bot (JavaScript / Python / C++): ${esc(t.game.botHint || '')} Server biên dịch và chạy thử bot trước khi nhận.
                 Bạn có thể sửa code đến khi admin chốt danh sách.</p>
                 <div class="form-grid">
                     <label>Tên thi đấu<input id="r-name" maxlength="40" ${me ? `value="${esc(me.username)}" disabled` : 'placeholder="VD: Nguyễn Văn A"'}></label>
@@ -404,7 +421,7 @@
             const langFromName = (n) => /\.py$/i.test(n) ? 'python' : /\.(cpp|cc)$/i.test(n) ? 'cpp' : 'javascript';
             if (updating) $('#r-lang').value = mine.lang;
             $('#r-template').addEventListener('click', () => {
-                const tpl = window.MULTI_LANG_TEMPLATES && window.MULTI_LANG_TEMPLATES[$('#r-lang').value];
+                const tpl = ((window.GAME_TEMPLATES || {})[data.tournament.game.id] || {})[$('#r-lang').value];
                 if (!tpl) return toast('Không có code mẫu', true);
                 $('#r-code').value = tpl.blue || tpl.red || '';
             });
@@ -461,7 +478,7 @@
                 ${[...live.values()].map(g => `<div class="live-card">
                     <div class="vs-title"><span class="player-tag blue">${esc(g.blue.name)}</span> vs <span class="player-tag red">${esc(g.red.name)}</span></div>
                     <div class="muted small" style="margin:.2rem 0">Ván ${g.gameNo} · nước ${g.ply}${g.ended ? ' · ' + g.ended : ''}</div>
-                    ${boardHTML(g.board, { size: 'sm', last: g.last })}</div>`).join('')}</div></div>`;
+                    ${boardHTML(g.board, { size: 'sm', last: g.last, goals: data.tournament.rules.blueGoal ? { blue: data.tournament.rules.blueGoal, red: data.tournament.rules.redGoal } : null })}</div>`).join('')}</div></div>`;
         }
         const mkLive = (g) => {
             const board = cloneBoard(g.board);
@@ -538,20 +555,23 @@
     // =====================================================================
     // Match history
     // =====================================================================
-    const hist = { kind: '', player: '', mine: false, offset: 0, limit: 25 };
+    const hist = { kind: '', game: '', player: '', mine: false, offset: 0, limit: 25 };
     const KIND_LABEL = { online: 'Online', local: 'Luyện tập', tournament: 'Giải đấu' };
 
     async function viewMatches() {
         view.innerHTML = `<div class="row between" style="margin-bottom:1rem"><h1>📜 Lịch sử trận đấu</h1></div>
             <div class="card"><div class="row">
                 <label>Loại trận<select id="h-kind"><option value="">Tất cả</option><option value="tournament">Giải đấu</option><option value="online">Online</option><option value="local">Luyện tập</option></select></label>
+                <label>Trò chơi<select id="h-game"><option value="">Tất cả</option>${Object.values(GAMES).map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></label>
                 <label>Tìm người chơi<input id="h-player" placeholder="Tên…" value="${esc(hist.player)}"></label>
                 ${me ? `<label class="inline"><input type="checkbox" id="h-mine" ${hist.mine ? 'checked' : ''}> Chỉ trận của tôi</label>` : ''}
             </div></div><div id="h-list"></div>`;
         $('#h-kind').value = hist.kind;
+        $('#h-game').value = hist.game;
         const draw = async () => {
             const qs = new URLSearchParams({ limit: hist.limit, offset: hist.offset });
             if (hist.kind) qs.set('kind', hist.kind);
+            if (hist.game) qs.set('game', hist.game);
             if (hist.player) qs.set('player', hist.player);
             if (hist.mine && me) qs.set('mine', '1');
             const { total, rows } = await api('GET', `/api/matches?${qs}`);
@@ -560,7 +580,7 @@
             $('#h-list').innerHTML = rows.length ? `<div class="card table-wrap"><table><thead><tr><th>Thời gian</th><th>Loại</th><th>Xanh</th><th>Đỏ</th><th>Kết quả</th><th class="num">Nước</th><th></th></tr></thead><tbody>
                 ${rows.map(m => `<tr>
                     <td class="small">${fmtTime(m.createdAt)}</td>
-                    <td><span class="badge ${m.kind}">${KIND_LABEL[m.kind]}</span>${m.tournamentName ? `<div class="small"><a href="#/tournament/${m.tournamentId}">${esc(m.tournamentName)}</a></div>` : ''}</td>
+                    <td>${gameBadge(m.game)} <span class="badge ${m.kind}">${KIND_LABEL[m.kind]}</span>${m.tournamentName ? `<div class="small"><a href="#/tournament/${m.tournamentId}">${esc(m.tournamentName)}</a></div>` : ''}</td>
                     <td class="dot-blue ${m.winner === 'blue' ? 'win-name' : ''}">🔵 ${nameLink(m.blueName, m.blueUser)}</td>
                     <td class="dot-red ${m.winner === 'red' ? 'win-name' : ''}">🔴 ${nameLink(m.redName, m.redUser)}</td>
                     <td class="small">${m.winner === 'draw' ? '🤝 Hòa' : `🏆 ${m.winner === 'blue' ? 'Xanh' : 'Đỏ'} thắng`}</td>
@@ -576,6 +596,7 @@
             if (next) next.onclick = () => { hist.offset += hist.limit; draw(); };
         };
         $('#h-kind').addEventListener('change', (e) => { hist.kind = e.target.value; hist.offset = 0; draw(); });
+        $('#h-game').addEventListener('change', (e) => { hist.game = e.target.value; hist.offset = 0; draw(); });
         const mineBox = $('#h-mine');
         if (mineBox) mineBox.addEventListener('change', (e) => { hist.mine = e.target.checked; hist.offset = 0; draw(); });
         $('#h-player').addEventListener('input', debounce((e) => { hist.player = e.target.value.trim(); hist.offset = 0; draw(); }, 300));
@@ -588,7 +609,7 @@
     async function viewAdmin(tab) {
         tab = tab || 'overview';
         if (!isAdmin) {
-            view.innerHTML = `<div class="card empty">🔒 Chỉ admin mới vào được trang này.<br>Đăng nhập rồi bấm 🔑 và nhập ADMIN_KEY một lần để nhận quyền.</div>`;
+            view.innerHTML = `<div class="card empty">🔒 Chỉ admin mới vào được trang này.<br>Chỉ tài khoản được cấp quyền quản trị mới có thể mở trang này.</div>`;
             return;
         }
         view.innerHTML = `<div class="row between" style="margin-bottom:1rem"><h1>🛠 Quản trị</h1>
@@ -597,13 +618,15 @@
                 <button class="btn ${tab === 'overview' ? 'active' : ''}" data-tab="overview">📊 Tổng quan</button>
                 <button class="btn ${tab === 'tournaments' ? 'active' : ''}" data-tab="tournaments">🏆 Giải đấu</button>
                 <button class="btn ${tab === 'users' ? 'active' : ''}" data-tab="users">👥 Người dùng</button>
-                <button class="btn ${tab === 'security' ? 'active' : ''}" data-tab="security">🛡 Bảo mật</button></div>
+                <button class="btn ${tab === 'security' ? 'active' : ''}" data-tab="security">🛡 Bảo mật</button>
+                <button class="btn ${tab === 'backups' ? 'active' : ''}" data-tab="backups">💾 Sao lưu</button></div>
             <div id="adm-body"><div class="empty">Đang tải…</div></div>`;
         view.querySelector('.tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) viewAdmin(b.dataset.tab); });
-        if (tab === 'users') await adminUsers();
+        if (tab === 'overview') await adminOverview();
+        else if (tab === 'users') await adminUsers();
         else if (tab === 'security') await adminSecurity();
-        else if (tab === 'tournaments') await adminTournaments();
-        else await adminOverview();
+        else if (tab === 'backups') await adminBackups();
+        else await adminTournaments();
     }
 
     async function adminOverview() {
@@ -613,22 +636,10 @@
         ]);
         const openTournaments = tournaments.filter(t => t.status === 'registration' || t.status === 'running').length;
         $('#adm-body').innerHTML = `<div class="stat-grid admin-overview-grid">
-            <div class="stat overview-card overview-users">
-                <div class="overview-card-heading"><span>Người chơi toàn hệ thống</span><span class="overview-icon" aria-hidden="true">♟</span></div>
-                <b>${stats.users}</b><small>Tài khoản đã đăng ký</small>
-            </div>
-            <div class="stat overview-card overview-tournaments">
-                <div class="overview-card-heading"><span>Giải đấu đang mở</span><span class="overview-icon" aria-hidden="true">♜</span></div>
-                <b>${openTournaments}</b><small>Trong ${tournaments.length} giải đấu</small>
-            </div>
-            <div class="stat overview-card overview-submissions">
-                <div class="overview-card-heading"><span>Bài nộp của người dùng</span><span class="overview-icon" aria-hidden="true">⌘</span></div>
-                <b>${stats.submissions}</b><small>Bot đã đăng ký vào giải đấu</small>
-            </div>
-            <div class="stat overview-card overview-matches">
-                <div class="overview-card-heading"><span>Trận đấu đang chạy</span><span class="overview-icon" aria-hidden="true">⚔</span></div>
-                <b>${stats.matches}</b><small>Đang diễn ra trực tiếp</small>
-            </div>
+            <div class="stat overview-card overview-users"><div class="overview-card-heading"><span>Người chơi toàn hệ thống</span><span class="overview-icon" aria-hidden="true">♟</span></div><b>${stats.users}</b><small>Tài khoản đã đăng ký</small></div>
+            <div class="stat overview-card overview-tournaments"><div class="overview-card-heading"><span>Giải đấu đang mở</span><span class="overview-icon" aria-hidden="true">♜</span></div><b>${openTournaments}</b><small>Trong ${tournaments.length} giải đấu</small></div>
+            <div class="stat overview-card overview-submissions"><div class="overview-card-heading"><span>Bài nộp của người dùng</span><span class="overview-icon" aria-hidden="true">⌘</span></div><b>${stats.submissions}</b><small>Bot đã đăng ký vào giải đấu</small></div>
+            <div class="stat overview-card overview-matches"><div class="overview-card-heading"><span>Trận đấu đang chạy</span><span class="overview-icon" aria-hidden="true">⚔</span></div><b>${stats.matches}</b><small>Đang diễn ra trực tiếp</small></div>
         </div>`;
     }
 
@@ -651,7 +662,7 @@
     }
 
     async function adminSecurity() {
-        const { sandbox: sb, toolchains } = await api('GET', '/api/admin/sandbox');
+        const { sandbox: sb, toolchains, load } = await api('GET', '/api/admin/sandbox');
         const LV = {
             strong: ['finished', 'Mạnh — cách ly hoàn toàn (không mạng, không thấy file máy chủ)'],
             basic: ['running', 'Cơ bản — chặn tiến trình/file/mạng bằng cơ chế của ngôn ngữ (không phải ranh giới tuyệt đối)'],
@@ -671,9 +682,44 @@
                     Node permission: ${sb.nodePermission ? esc(sb.nodePermission) : 'không có'}</p>
                 <table><thead><tr><th>Ngôn ngữ</th><th>Mức</th><th>Ý nghĩa</th></tr></thead><tbody>${rows}</tbody></table>
                 ${sb.notes.length ? `<div class="notice" style="margin-top:.8rem"><strong>Lưu ý</strong><ul style="margin:.3rem 0 0 1.1rem">${sb.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
-                <p class="small muted" style="margin-top:.8rem">Giới hạn mỗi nước: ${sb.limits.cpuSeconds}s CPU · ${sb.limits.memoryMB}MB RAM (Python/C++) · heap JS ${sb.limits.nodeHeapMB}MB.
+                <p class="small" style="margin-top:.8rem">⚙️ Tải hiện tại: <strong>${load.bots.active}/${load.bots.limit}</strong> tiến trình bot đang chạy, ${load.bots.queued} đang chờ (cao nhất từng thấy ${load.bots.maxActive}) ·
+                    biên dịch C++: ${load.compiles.active}/${load.compiles.limit}, ${load.compiles.queued} đang chờ. Giới hạn chung cho TOÀN BỘ máy chủ (<code>MAX_BOT_PROCS</code>, <code>MAX_COMPILES</code>).</p>
+                <p class="small muted" style="margin-top:.4rem">Giới hạn mỗi nước: ${sb.limits.cpuSeconds}s CPU · ${sb.limits.memoryMB}MB RAM (Python/C++) · heap JS ${sb.limits.nodeHeapMB}MB.
                     Biến môi trường: <code>SANDBOX=auto|bwrap|builtin|off</code>, <code>SANDBOX_STRICT=1</code>, <code>SANDBOX_MEM_MB</code>, <code>SANDBOX_CPU_SEC</code>. Xem <code>docs/SECURITY.md</code>.</p>
             </div>`;
+    }
+
+    async function adminBackups() {
+        const draw = async () => {
+            const { enabled, backups } = await api('GET', '/api/admin/backups');
+            const fmtSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+            $('#adm-body').innerHTML = `<div class="card"><div class="row between"><h2>💾 Sao lưu cơ sở dữ liệu</h2>
+                <button class="btn btn-primary" id="bk-now" ${enabled ? '' : 'disabled'}>Sao lưu ngay</button></div>
+                <p class="muted small" style="margin:.4rem 0 .8rem">Bản sao lưu chứa <strong>mọi thứ</strong>: băm mật khẩu, code của tất cả bot, lịch sử trận. Hãy cất kỹ.
+                Tự động mỗi <code>BACKUP_INTERVAL_HOURS</code> giờ (mặc định 24), giữ <code>BACKUP_KEEP</code> bản mới nhất (mặc định 14).
+                Khôi phục: tắt server, chép file <code>.db</code> đè lên <code>data/ott.db</code>, xóa <code>ott.db-wal</code> và <code>ott.db-shm</code>, bật lại.</p>
+                ${!enabled ? '<div class="notice">CSDL đang chạy trong bộ nhớ (DB_PATH=:memory:) nên không thể sao lưu.</div>' : ''}
+                ${backups.length ? `<table><thead><tr><th>Tệp</th><th>Lúc</th><th class="num">Dung lượng</th><th></th></tr></thead><tbody>
+                ${backups.map(b => `<tr><td class="mono small">${esc(b.name)}</td><td class="small">${fmtTime(b.createdAt)}</td><td class="num">${fmtSize(b.size)}</td>
+                    <td><button class="btn btn-sm" data-dl="${esc(b.name)}">⬇ Tải về</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">Chưa có bản sao lưu nào.</p>'}</div>`;
+            const now = $('#bk-now');
+            if (now) now.onclick = async () => {
+                now.disabled = true;
+                try { await api('POST', '/api/admin/backups'); toast('Đã sao lưu'); await draw(); } catch (e) { toast(e.message, true); now.disabled = false; }
+            };
+            $('#adm-body').onclick = async (e) => {
+                const b = e.target.closest('[data-dl]');
+                if (!b) return;
+                try {
+                    const res = await fetch(`/api/admin/backups/${encodeURIComponent(b.dataset.dl)}`);
+                    if (!res.ok) throw new Error('Không tải được');
+                    const url = URL.createObjectURL(await res.blob());
+                    const a = document.createElement('a'); a.href = url; a.download = b.dataset.dl; a.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                } catch (err) { toast(err.message, true); }
+            };
+        };
+        await draw();
     }
 
     async function adminUsers() {
@@ -705,27 +751,43 @@
     // ---------- tournament + rules editor ----------
     async function viewTournamentEditor(idParam) {
         if (!isAdmin) return viewAdmin();
-        const isNew = idParam === 'new';
-        const [def, detail] = await Promise.all([
-            api('GET', '/api/rules/default'),
-            isNew ? Promise.resolve(null) : api('GET', `/api/tournaments/${idParam}`)
-        ]);
+        const [idPart, qs] = String(idParam).split('?');
+        const isNew = idPart === 'new';
+        const hashGame = new URLSearchParams(qs || '').get('game');
+        const detail = isNew ? null : await api('GET', `/api/tournaments/${idPart}`);
         const t = detail && detail.tournament;
         const started = !!t && t.status !== 'registration';          // rules are frozen once games exist
-        const cfg = t ? t.config : { bestOf: 3, groupBestOf: 2, groupCount: 2, advance: 2, thirdPlace: false, moveDelayMs: 0, concurrency: 2, requireLogin: true };
-        const eff = t ? t.rules : def;
-        const rules = {
-            maxPlies: eff.maxPlies, moveTimeoutMs: eff.moveTimeoutMs, timeBankMs: eff.timeBankMs || 0,
-            blueGoal: { ...eff.blueGoal }, redGoal: { ...eff.redGoal },
-            setup: { p1: eff.setup.p1.map(p => ({ ...p })), p2: eff.setup.p2.map(p => ({ ...p })) }
-        };
+        const gameId = started ? t.game.id : (hashGame && GAMES[hashGame] ? hashGame : (t ? t.game.id : 'rps'));
+        const hasEntries = !!detail && detail.entries.length > 0;
+        const def = await api('GET', `/api/rules/default?game=${gameId}`);
+        const sameGame = !!t && t.game.id === gameId;                // switching the game starts from that game's defaults
+        const cfg = sameGame ? t.config : { bestOf: 3, groupBestOf: 2, groupCount: 2, advance: 2, thirdPlace: false, moveDelayMs: 0, concurrency: 2, requireLogin: true };
+        const eff = sameGame ? t.rules : def;
+        const isRps = gameId === 'rps';
+
+        const rules = { maxPlies: eff.maxPlies, moveTimeoutMs: eff.moveTimeoutMs, timeBankMs: eff.timeBankMs || 0, size: eff.rows };
+        if (isRps) {
+            Object.assign(rules, {
+                blueGoal: { ...eff.blueGoal }, redGoal: { ...eff.redGoal },
+                beats: Object.fromEntries(Object.entries(eff.beats).map(([k, v]) => [k, [...v]])),
+                setup: { p1: eff.setup.p1.map(p => ({ ...p })), p2: eff.setup.p2.map(p => ({ ...p })) }
+            });
+        } else {
+            rules.winLength = eff.winLength;
+        }
         const tool = { side: 1, kind: 'rock' };
-        let valid = true;
+        const TYPES = [['rock', '✊ Đá'], ['paper', '✋ Giấy'], ['scissors', '✌️ Kéo']];
+        const back = isNew ? '#/admin' : `#/tournament/${t.id}`;
 
         view.innerHTML = `
-            <a href="${isNew ? '#/admin' : `#/tournament/${t.id}`}" class="small">← ${isNew ? 'Quản trị' : 'Về giải đấu'}</a>
+            <a href="${back}" class="small">← ${isNew ? 'Quản trị' : 'Về giải đấu'}</a>
             <h1>${isNew ? '➕ Tạo giải đấu' : `✏️ Sửa: ${esc(t.name)}`}</h1>
-            ${started ? '<div class="notice">Giải đã bắt đầu: chỉ đổi được <strong>tên</strong>, <strong>độ trễ trình diễn</strong> và <strong>số ván chạy song song</strong>. Luật chơi đã khóa vì các ván đã đấu theo luật hiện tại.</div>' : ''}
+            ${started ? '<div class="notice">Giải đã bắt đầu: chỉ đổi được <strong>tên</strong>, <strong>độ trễ trình diễn</strong> và <strong>số ván chạy song song</strong>. Trò chơi và luật chơi đã khóa vì các ván đã đấu theo luật hiện tại.</div>' : ''}
+            ${started ? '' : `<div class="card"><h2>Trò chơi</h2><div class="row">
+                ${Object.values(GAMES).map(g => hasEntries && g.id !== gameId
+                    ? `<span class="btn btn-sm" style="opacity:.45;cursor:not-allowed" title="Đã có bot đăng ký (viết cho trò chơi hiện tại) — hãy xóa hết bot trước">${esc(g.name)}</span>`
+                    : `<a class="btn btn-sm ${g.id === gameId ? 'btn-primary' : ''}" style="text-decoration:none" href="#/admin/edit/${idPart}?game=${g.id}">${esc(g.name)}</a>`).join('')}
+                </div><p class="muted small" style="margin-top:.5rem">${esc((GAMES[gameId] || {}).description || '')}</p></div>`}
             <div class="card"><h2>Thông tin giải</h2><div class="form-grid">
                 <label>Tên giải<input id="e-name" maxlength="80" value="${esc(t ? t.name : '')}" placeholder="VD: Giải OTT mùa thu 2026"></label>
                 <label>Thể thức<select id="e-format" ${started ? 'disabled' : ''}>
@@ -740,13 +802,22 @@
                 <label class="inline"><input id="e-login" type="checkbox" ${cfg.requireLogin ? 'checked' : ''} ${started ? 'disabled' : ''}> Bắt buộc đăng nhập để đăng ký</label>
             </div></div>
 
-            <div class="card"><h2>⚙️ Luật chơi</h2>
+            <div class="card"><h2>⚙️ Luật chơi — ${esc((GAMES[gameId] || {}).short || gameId)}</h2>
                 <div class="form-grid">
-                    <label>Giới hạn số nước đi (hòa)<input id="r-plies" type="number" min="20" max="2000" value="${rules.maxPlies}" ${started ? 'disabled' : ''}></label>
+                    <label>Cỡ bàn (${isRps ? '5–15' : '3–19'})<input id="r-size" type="number" min="${isRps ? 5 : 3}" max="${isRps ? 15 : 19}" value="${rules.size}" ${started ? 'disabled' : ''}></label>
+                    ${isRps ? '' : `<label>Số quân liên tiếp để thắng (3–6)<input id="r-win" type="number" min="3" max="6" value="${rules.winLength}" ${started ? 'disabled' : ''}></label>`}
+                    <label>Giới hạn số nước đi (hòa)<input id="r-plies" type="number" min="5" max="2000" value="${rules.maxPlies}" ${started ? 'disabled' : ''}></label>
                     <label>Thời gian tối đa mỗi nước (ms)<input id="r-timeout" type="number" min="100" max="10000" value="${rules.moveTimeoutMs}" ${started ? 'disabled' : ''}></label>
                     <label>Tổng thời gian suy nghĩ mỗi bên (ms)<input id="r-bank" type="number" min="0" max="3600000" value="${rules.timeBankMs}" ${started ? 'disabled' : ''} title="0 = không giới hạn. Hết giờ tổng = thua. Tính cả thời gian khởi động tiến trình bot."></label>
                 </div>
-                <p class="muted small" style="margin:.2rem 0 .6rem">Thời gian tổng chạy như đồng hồ cờ vua: mỗi nước bot dùng bao nhiêu thì trừ vào quỹ của bên đó; hết quỹ là thua. Nước đi cuối cùng bị giới hạn bởi phần quỹ còn lại.</p>
+                <p class="muted small" style="margin:.2rem 0 .6rem">Thời gian tổng chạy như đồng hồ cờ vua: mỗi nước bot dùng bao nhiêu trừ vào quỹ của bên đó; hết quỹ là thua.</p>
+                ${isRps ? `
+                <h3 style="margin-top:.6rem">Ai ăn được ai</h3>
+                <table class="beats-table"><thead><tr><th>ăn được ↓ / quân bị ăn →</th>${TYPES.map(([k, l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
+                    ${TYPES.map(([att, al]) => `<tr><th>${al}</th>${TYPES.map(([vic]) => `<td><input type="checkbox" data-att="${att}" data-vic="${vic}" ${att === vic ? 'disabled' : ''} ${(rules.beats[att] || []).includes(vic) ? 'checked' : ''} ${started ? 'disabled' : ''}></td>`).join('')}</tr>`).join('')}
+                </tbody></table>
+                ${started ? '' : '<div class="row" style="margin:.4rem 0"><button class="btn btn-sm" id="b-beats-default">↺ Mặc định (Đá > Kéo > Giấy > Đá)</button><button class="btn btn-sm" id="b-beats-flip">⟲ Đảo chiều</button></div>'}
+                <h3 style="margin-top:.6rem">Thế cờ xuất phát</h3>
                 ${started ? '' : `<div class="row" style="margin-bottom:.5rem">
                     <span class="seg" id="t-side"><button data-side="1" class="on blue">🔵 Xanh</button><button data-side="2">🔴 Đỏ</button></span>
                     <span class="seg" id="t-kind">
@@ -754,17 +825,18 @@
                         <button data-kind="erase">🧹 Xóa</button><button data-kind="goalBlue">🎯 Đích Xanh</button><button data-kind="goalRed">🎯 Đích Đỏ</button></span>
                 </div>
                 <div class="row" style="margin-bottom:.6rem">
-                    <button class="btn btn-sm" id="b-default">↺ Mặc định</button>
+                    <button class="btn btn-sm" id="b-default">↺ Mặc định (bàn 9×9)</button>
                     <button class="btn btn-sm" id="b-mirror" title="Đỏ = Xanh xoay 180° (cùng loại quân) — thế cờ công bằng">⇄ Phản chiếu Xanh → Đỏ</button>
                     <button class="btn btn-sm" id="b-clear">🗑 Xóa hết quân</button>
-                    <span class="small muted">Bấm vào ô để đặt quân · chuột phải để xóa</span></div>`}
+                    <span class="small muted">Bấm vào ô để đặt quân · chuột phải để xóa · đổi cỡ bàn sẽ đặt lại ô đích về hai góc</span></div>`}` : `
+                <p class="muted small">Bàn cờ trống; hai bên lần lượt đặt quân, Xanh đi trước. Xem trước bàn cờ:</p>`}
                 <div class="row" style="align-items:flex-start;gap:1.2rem">
                     <div id="ed-board"></div>
                     <div style="flex:1;min-width:220px"><div id="ed-count" class="small" style="line-height:1.8"></div><div id="ed-issues" class="issues">…</div></div>
                 </div>
             </div>
             <div class="row"><button class="btn btn-primary" id="e-save">💾 ${isNew ? 'Tạo giải đấu' : 'Lưu thay đổi'}</button>
-                <a class="btn" href="${isNew ? '#/admin' : `#/tournament/${t.id}`}" style="text-decoration:none">Hủy</a><span id="e-msg" class="small"></span></div>`;
+                <a class="btn" href="${back}" style="text-decoration:none">Hủy</a><span id="e-msg" class="small"></span></div>`;
 
         // show only the fields that make sense for the chosen format
         const syncFormat = () => {
@@ -774,32 +846,42 @@
         $('#e-format').addEventListener('change', syncFormat);
         syncFormat();
 
-        // ---- board editor ----
+        // ---- live preview / board editor ----
         const boardMatrix = () => {
-            const b = Array.from({ length: 9 }, () => Array(9).fill(null));
-            rules.setup.p1.forEach(p => { b[p.r][p.c] = { player: 1, type: p.t }; });
-            rules.setup.p2.forEach(p => { b[p.r][p.c] = { player: 2, type: p.t }; });
+            const n = rules.size;
+            const b = Array.from({ length: n }, () => Array(n).fill(null));
+            if (isRps) {
+                rules.setup.p1.forEach(p => { b[p.r][p.c] = { player: 1, type: p.t }; });
+                rules.setup.p2.forEach(p => { b[p.r][p.c] = { player: 2, type: p.t }; });
+            }
             return b;
         };
-        const countsHTML = () => ['p1', 'p2'].map((k, i) => {
-            const n = (type) => rules.setup[k].filter(p => p.t === type).length;
-            return `<span class="${i ? 'dot-red' : 'dot-blue'}"><strong>${i ? '🔴 Đỏ' : '🔵 Xanh'}</strong></span>: ${rules.setup[k].length} quân (✊${n('rock')} ✋${n('paper')} ✌️${n('scissors')})`;
-        }).join('<br>') + `<br>🎯 Đích Xanh: <strong>${notation(rules.blueGoal)}</strong> · Đích Đỏ: <strong>${notation(rules.redGoal)}</strong>`;
+        const countsHTML = () => {
+            if (!isRps) return `Bàn <strong>${rules.size}×${rules.size}</strong> · thắng khi có <strong>${rules.winLength}</strong> quân liên tiếp · tối đa ${rules.maxPlies} nước`;
+            return ['p1', 'p2'].map((k, i) => {
+                const n = (type) => rules.setup[k].filter(p => p.t === type).length;
+                return `<span class="${i ? 'dot-red' : 'dot-blue'}"><strong>${i ? '🔴 Đỏ' : '🔵 Xanh'}</strong></span>: ${rules.setup[k].length} quân (✊${n('rock')} ✋${n('paper')} ✌️${n('scissors')})`;
+            }).join('<br>') + `<br>🎯 Đích Xanh: <strong>${notation(rules.blueGoal, rules.size)}</strong> · Đích Đỏ: <strong>${notation(rules.redGoal, rules.size)}</strong>`;
+        };
         const drawBoard = () => {
-            $('#ed-board').innerHTML = boardHTML(boardMatrix(), { size: 'lg', goals: { blue: rules.blueGoal, red: rules.redGoal } });
+            $('#ed-board').innerHTML = isRps
+                ? boardHTML(boardMatrix(), { size: 'lg', goals: { blue: rules.blueGoal, red: rules.redGoal } })
+                : boardHTML(boardMatrix(), { size: 'sm', goals: null });
             $('#ed-count').innerHTML = countsHTML();
         };
 
         let vTimer = null;
         const readNumbers = () => {
             rules.maxPlies = +$('#r-plies').value; rules.moveTimeoutMs = +$('#r-timeout').value; rules.timeBankMs = +$('#r-bank').value || 0;
+            rules.size = +$('#r-size').value || rules.size;
+            if (!isRps) rules.winLength = +$('#r-win').value || rules.winLength;
         };
         const validate = () => {
             clearTimeout(vTimer);
             vTimer = setTimeout(async () => {
                 try {
                     readNumbers();
-                    const out = await api('POST', '/api/rules/validate', rules);   // the SAME validator the server applies on save
+                    const out = await api('POST', `/api/rules/validate?game=${gameId}`, rules);   // the SAME validator the server applies on save
                     valid = out.ok;
                     const box = $('#ed-issues');
                     if (!box) return;
@@ -809,6 +891,7 @@
                 } catch (e) { /* offline: server will validate on save */ }
             }, 300);
         };
+        let valid = true;
         const changed = () => { drawBoard(); validate(); };
 
         function placeAt(r, c, forceErase) {
@@ -821,30 +904,64 @@
         }
 
         if (!started) {
-            const pick = (groupId, attr, apply) => $(groupId).addEventListener('click', (e) => {
-                const b = e.target.closest(`[data-${attr}]`);
-                if (!b) return;
-                $(groupId).querySelectorAll('button').forEach(x => x.className = '');
-                b.className = 'on' + (attr === 'side' ? (b.dataset.side === '1' ? ' blue' : ' red') : '');
-                apply(b.dataset[attr]);
-            });
-            pick('#t-side', 'side', (v) => { tool.side = +v; if (['goalBlue', 'goalRed', 'erase'].includes(tool.kind)) { /* keep tool */ } });
-            pick('#t-kind', 'kind', (v) => { tool.kind = v; });
-            const board = $('#ed-board');
-            board.addEventListener('click', (e) => { const c = e.target.closest('.c'); if (c) placeAt(+c.dataset.r, +c.dataset.c, false); });
-            board.addEventListener('contextmenu', (e) => { const c = e.target.closest('.c'); if (c) { e.preventDefault(); placeAt(+c.dataset.r, +c.dataset.c, true); } });
-            board.classList.add('editor-board');
-            $('#b-default').addEventListener('click', () => {
-                rules.setup = { p1: def.setup.p1.map(p => ({ ...p })), p2: def.setup.p2.map(p => ({ ...p })) };
-                rules.blueGoal = { ...def.blueGoal }; rules.redGoal = { ...def.redGoal };
-                changed();
-            });
-            $('#b-mirror').addEventListener('click', () => {
-                rules.setup.p2 = rules.setup.p1.map(p => ({ r: 8 - p.r, c: 8 - p.c, t: p.t }));
-                changed();
-            });
-            $('#b-clear').addEventListener('click', () => { rules.setup = { p1: [], p2: [] }; changed(); });
             ['#r-plies', '#r-timeout', '#r-bank'].forEach(id => $(id).addEventListener('input', validate));
+            if (!isRps) {
+                $('#r-win').addEventListener('input', () => { readNumbers(); changed(); });
+                $('#r-size').addEventListener('change', () => {          // default draw limit follows the board: every cell
+                    const n = Math.max(3, Math.min(19, +$('#r-size').value || 15));
+                    $('#r-size').value = n; $('#r-plies').value = n * n; readNumbers(); changed();
+                });
+            } else {
+                $('#r-size').addEventListener('change', () => {
+                    const n = Math.max(5, Math.min(15, +$('#r-size').value || 9));
+                    $('#r-size').value = n; rules.size = n;
+                    rules.blueGoal = { r: 0, c: n - 1 }; rules.redGoal = { r: n - 1, c: 0 };
+                    for (const k of ['p1', 'p2']) rules.setup[k] = rules.setup[k].filter(p => p.r < n && p.c < n);
+                    changed();
+                });
+                const pick = (groupId, attr, apply) => $(groupId).addEventListener('click', (e) => {
+                    const b = e.target.closest(`[data-${attr}]`);
+                    if (!b) return;
+                    $(groupId).querySelectorAll('button').forEach(x => x.className = '');
+                    b.className = 'on' + (attr === 'side' ? (b.dataset.side === '1' ? ' blue' : ' red') : '');
+                    apply(b.dataset[attr]);
+                });
+                pick('#t-side', 'side', (v) => { tool.side = +v; });
+                pick('#t-kind', 'kind', (v) => { tool.kind = v; });
+                const board = $('#ed-board');
+                board.addEventListener('click', (e) => { const c = e.target.closest('.c'); if (c) placeAt(+c.dataset.r, +c.dataset.c, false); });
+                board.addEventListener('contextmenu', (e) => { const c = e.target.closest('.c'); if (c) { e.preventDefault(); placeAt(+c.dataset.r, +c.dataset.c, true); } });
+                board.classList.add('editor-board');
+                $('#b-default').addEventListener('click', () => {
+                    rules.size = 9; $('#r-size').value = 9;
+                    rules.setup = { p1: def.setup.p1.map(p => ({ ...p })), p2: def.setup.p2.map(p => ({ ...p })) };
+                    rules.blueGoal = { ...def.blueGoal }; rules.redGoal = { ...def.redGoal };
+                    changed();
+                });
+                $('#b-mirror').addEventListener('click', () => {
+                    rules.setup.p2 = rules.setup.p1.map(p => ({ r: rules.size - 1 - p.r, c: rules.size - 1 - p.c, t: p.t }));
+                    changed();
+                });
+                $('#b-clear').addEventListener('click', () => { rules.setup = { p1: [], p2: [] }; changed(); });
+
+                // capture table
+                const syncBeatsUI = () => view.querySelectorAll('[data-att]').forEach(cb => { cb.checked = rules.beats[cb.dataset.att].includes(cb.dataset.vic); });
+                view.querySelectorAll('[data-att]').forEach(cb => cb.addEventListener('change', () => {
+                    const list = new Set(rules.beats[cb.dataset.att]);
+                    if (cb.checked) list.add(cb.dataset.vic); else list.delete(cb.dataset.vic);
+                    rules.beats[cb.dataset.att] = [...list];
+                    validate();
+                }));
+                $('#b-beats-default').addEventListener('click', () => {
+                    rules.beats = Object.fromEntries(Object.entries(def.beats).map(([k, v]) => [k, [...v]]));
+                    syncBeatsUI(); validate();
+                });
+                $('#b-beats-flip').addEventListener('click', () => {
+                    const flipped = { rock: [], paper: [], scissors: [] };
+                    for (const [att, victims] of Object.entries(rules.beats)) victims.forEach(v => flipped[v].push(att));
+                    rules.beats = flipped; syncBeatsUI(); validate();
+                });
+            }
         }
 
         // ---- save ----
@@ -861,7 +978,7 @@
                 };
                 if (!started) config.rules = rules;
                 const body = { name: $('#e-name').value, config };
-                if (!started) body.format = $('#e-format').value;
+                if (!started) { body.format = $('#e-format').value; body.game = gameId; }
                 if (isNew) {
                     const out = await api('POST', '/api/tournaments', body);
                     toast('Đã tạo giải đấu');
@@ -954,7 +1071,8 @@
     // =====================================================================
     async function viewMatch(id) {
         const m = await api('GET', `/api/matches/${id}`);
-        const goals = { blue: m.rules.blueGoal, red: m.rules.redGoal };
+        const goals = m.rules.blueGoal ? { blue: m.rules.blueGoal, red: m.rules.redGoal } : null;   // only games with goal squares
+        const placement = m.game !== 'rps' && !m.moves.some(x => x.from);   // stones are placed, nothing moves
         const rows = m.rules.rows;
         const boards = [m.initialBoard];
         m.moves.forEach(mv => { const nb = cloneBoard(boards[boards.length - 1]); applyMoveTo(nb, mv); boards.push(nb); });
@@ -968,7 +1086,7 @@
                         <span class="player-tag blue ${m.winner === 'blue' ? 'winner' : ''}">🔵 ${esc(m.blue.name)}</span> vs
                         <span class="player-tag red ${m.winner === 'red' ? 'winner' : ''}">🔴 ${esc(m.red.name)}</span>
                     </div>
-                    <div>${isAdmin && m.kind !== 'tournament' ? '<button class="btn btn-sm btn-danger" id="rp-del">🗑 Xóa trận</button> ' : ''}<span class="badge ${m.kind}">${KIND_LABEL[m.kind]}</span>
+                    <div>${isAdmin && m.kind !== 'tournament' ? '<button class="btn btn-sm btn-danger" id="rp-del">🗑 Xóa trận</button> ' : ''}${gameBadge(m.game)} <span class="badge ${m.kind}">${KIND_LABEL[m.kind]}</span>
                     ${m.tournamentId ? `<a class="small" href="#/tournament/${m.tournamentId}">${esc(m.tournamentName)}${m.gameNo ? ` · ván ${m.gameNo}` : ''}</a>` : ''}</div>
                 </div>
                 <p class="small" style="margin-top:.4rem"><strong>${m.winner === 'draw' ? '🤝 Hòa' : `🏆 ${m.winner === 'blue' ? esc(m.blue.name) : esc(m.red.name)} thắng`}</strong> — ${esc(m.reason)}
@@ -988,11 +1106,11 @@
                 </div>
                 <div class="card" style="margin:0">
                     <div class="row between"><strong id="rp-status"></strong></div>
-                    <div class="captured" id="rp-cap-blue"></div><div class="captured" id="rp-cap-red"></div>
+                    <div class="captured" id="rp-cap-blue" ${placement ? 'style="display:none"' : ''}></div><div class="captured" id="rp-cap-red" ${placement ? 'style="display:none"' : ''}></div>
                     <h3 style="margin-top:.6rem">Danh sách nước đi</h3>
                     <div class="move-list" id="rp-moves">${m.moves.map((mv, i) => `
                         <div class="mv p${mv.player}" data-ply="${i + 1}"><span class="n">${i + 1}.</span><span class="who">${mv.player === 1 ? '🔵' : '🔴'}</span>
-                        <span>${EMOJI[mv.pieceType] || ''} ${notation(mv.from, rows)}→${notation(mv.to, rows)}${mv.capture ? ' ×' + (EMOJI[mv.capture] || '') : ''}</span>
+                        <span>${mv.from ? `${EMOJI[mv.pieceType] || ''} ${notation(mv.from, rows)}→${notation(mv.to, rows)}${mv.capture ? ' ×' + (EMOJI[mv.capture] || '') : ''}` : `● ${notation(mv.to, rows)}`}</span>
                         ${mv.fallback ? '<span class="warn" title="Bot lỗi / quá giờ / đi sai — server chọn nước ngẫu nhiên">⚠️</span>' : ''}</div>`).join('')}</div>
                     <h3 style="margin-top:.6rem">Nhật ký bot (nước đang xem)</h3>
                     <div class="log-box" id="rp-log"></div>
@@ -1056,5 +1174,16 @@
     }
 
     // ---------- boot ----------
-    refreshMe().then(route);
+    api('GET', '/api/games')
+        .then(list => { GAMES = Object.fromEntries(list.map(g => [g.id, g])); })
+        .catch(() => { })
+        .then(refreshMe)
+        .then(() => {
+            if (!me) {
+                location.replace('index.html');
+                return;
+            }
+            document.documentElement.style.visibility = '';
+            route();
+        });
 })();

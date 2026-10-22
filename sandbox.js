@@ -25,6 +25,10 @@
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
+const { Semaphore } = require('./semaphore');
+
+// g++ is heavy: never more than a couple at once (a burst of C++ submissions must not freeze the server)
+const compileSlots = new Semaphore(parseInt(process.env.MAX_COMPILES, 10) || 2);
 
 const IS_LINUX = process.platform === 'linux';
 const IS_WIN = process.platform === 'win32';
@@ -228,7 +232,8 @@ function wrapRun(handler, { pythonCmd }) {
     if (level === 'strong' && state.bwrapPath) {
         let inner, binds;
         if (lang === 'javascript') {
-            binds = ['--ro-bind', handler.scriptPath, '/bot/bot.js', '--ro-bind', ENGINE, ENGINE, ...toolMounts(process.execPath)];
+            const engineFile = handler.enginePath || ENGINE;
+            binds = ['--ro-bind', handler.scriptPath, '/bot/bot.js', '--ro-bind', engineFile, engineFile, ...toolMounts(process.execPath)];
             inner = [...limitPrefix({ addressSpace: false }), process.execPath, `--max-old-space-size=${NODE_HEAP_MB}`, '/bot/bot.js'];
         } else if (lang === 'python') {
             const py = which(pythonCmd);
@@ -246,7 +251,7 @@ function wrapRun(handler, { pythonCmd }) {
         if (level === 'basic' && state.nodeFlag) {
             return {
                 cmd: process.execPath, tier: 'basic',
-                args: [state.nodeFlag, `--allow-fs-read=${handler.scriptPath}`, `--allow-fs-read=${ENGINE}`,
+                args: [state.nodeFlag, `--allow-fs-read=${handler.scriptPath}`, `--allow-fs-read=${handler.enginePath || ENGINE}`,
                     `--max-old-space-size=${NODE_HEAP_MB}`, handler.scriptPath]
             };
         }
@@ -283,6 +288,10 @@ function scanCppSource(code) {
  * Compile srcPath -> exePath. Resolves { ok, text } (text = compiler output with paths scrubbed).
  */
 function compileCpp(srcPath, exePath, timeoutMs = 15000) {
+    return compileSlots.run(() => compileCppNow(srcPath, exePath, timeoutMs));
+}
+
+function compileCppNow(srcPath, exePath, timeoutMs) {
     return new Promise((resolve) => {
         const gpp = which('g++') || 'g++';
         const flags = ['-O2', '-std=c++17'];
@@ -321,6 +330,7 @@ function compileCpp(srcPath, exePath, timeoutMs = 15000) {
 
 module.exports = {
     detect, getStatus, guard, wrapRun, compileCpp, scanCppSource, which,
+    getCompileStats: () => compileSlots.stats(),
     // tests may force a mode before detect()
     configure(opts = {}) {
         if (opts.mode) state.mode = String(opts.mode).toLowerCase();

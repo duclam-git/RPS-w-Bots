@@ -11,7 +11,14 @@ if (!fs.existsSync(TEMP_DIR)) {
     fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
+const os = require('os');
 const sandbox = require('./sandbox');
+const { Semaphore } = require('./semaphore');
+
+// ALL bot processes of the whole server (online rooms + tournaments + practice) share this cap, so the
+// machine cannot be flooded no matter how many games run at once. The wait for a slot is NOT charged to the bot.
+const botSlots = new Semaphore(parseInt(process.env.MAX_BOT_PROCS, 10) || Math.max(2, os.cpus().length));
+const liveChildren = new Set();
 
 const MAX_BOT_OUTPUT_BYTES = 1024 * 1024;   // a bot that spams stdout/stderr is killed instead of eating RAM
 
@@ -68,7 +75,11 @@ const getToolchains = () => toolchains;
  * @param {string} code Source code string
  * @returns {Promise<{ success: boolean, error?: string, botHandler?: object }>}
  */
-async function prepareBot(playerId, lang, code) {
+/**
+ * @param {object} [opts]  { game } - the game the bot will play (its engine file is what JS bots get as `helpers`)
+ */
+async function prepareBot(playerId, lang, code, opts = {}) {
+    const enginePathHost = (opts.game && opts.game.enginePath) || path.join(__dirname, 'engine.js');
     const safeId = playerId.replace(/[^a-zA-Z0-9_-]/g, '_');
 
     if ((lang === 'python' || lang === 'cpp') && toolchains[lang].ok === false) {
@@ -94,7 +105,7 @@ async function prepareBot(playerId, lang, code) {
             }
             return { success: false, error: `Lỗi biên dịch C++:\n${out.text || 'biên dịch thất bại (quá thời gian hoặc hết bộ nhớ)'}` };
         }
-        return { success: true, botHandler: { lang: 'cpp', exePath, srcPath } };
+        return { success: true, botHandler: { lang: 'cpp', exePath, srcPath, enginePath: enginePathHost } };
     }
 
     if (lang === 'python') {
@@ -104,14 +115,15 @@ async function prepareBot(playerId, lang, code) {
             success: true,
             botHandler: {
                 lang: 'python',
-                scriptPath
+                scriptPath,
+                enginePath: enginePathHost
             }
         };
     }
 
     if (lang === 'javascript') {
         // Wrap JS code into a runner script that handles stdin/stdout JSON
-        const enginePath = JSON.stringify(path.join(__dirname, 'engine.js'));
+        const enginePath = JSON.stringify(enginePathHost);
         const wrapperCode = `
 ${code}
 
@@ -122,22 +134,25 @@ ${code}
         const input = __fs.readFileSync(0, 'utf-8');
         if (!input.trim()) return;
         const state = JSON.parse(input);
+        // Helpers come from the GAME's own engine file; the rules of this game travel inside state.rules
         const helpers = {
             distance: (r1, c1, r2, c2) => Math.max(Math.abs(r1 - r2), Math.abs(c1 - c2)),
-            canCapture: (a, b) => __E.canCapture(a, b),
-            simulateMove: (board, move) => __E.simulateMove(board, move),
-            getLegalMoves: (player, board) => __E.getLegalMoves(player, board),
-            toNotation: (r, c) => __E.toNotation(r, c),
-            fromNotation: (s) => __E.fromNotation(s),
-            randomChoice: (arr) => arr[Math.floor(Math.random() * arr.length)],
-            getPieceCounts: (player, board) => __E.countPieces(player, board),
-            getPieces: (player, board) => __E.getPieces(player, board)
+            randomChoice: (arr) => arr[Math.floor(Math.random() * arr.length)]
         };
+        const bind = (name, fn) => { if (typeof __E[name] === 'function') helpers[name] = fn; };
+        bind('canCapture', (a, b) => __E.canCapture(a, b, state.rules));
+        bind('simulateMove', (board, move, player) => __E.simulateMove(board, move, player, state.rules));
+        bind('getLegalMoves', (player, board) => __E.getLegalMoves(player, board, state.rules));
+        bind('toNotation', (r, c) => __E.toNotation(r, c, state.rules));
+        bind('fromNotation', (s) => __E.fromNotation(s, state.rules));
+        bind('checkWin', (board) => __E.checkWin(board, state.rules));
+        if (typeof __E.countPieces === 'function') helpers.getPieceCounts = (player, board) => __E.countPieces(player, board);
+        if (typeof __E.getPieces === 'function') helpers.getPieces = (player, board) => __E.getPieces(player, board);
         const log = (...args) => { console.error(args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')); };
         if (typeof getNextMove === 'function') {
             const move = getNextMove(state, helpers, log);
-            if (move && move.from && move.to) {
-                console.log(JSON.stringify({ from: move.from, to: move.to }));
+            if (move && move.to) {
+                console.log(JSON.stringify(move.from ? { from: move.from, to: move.to } : { to: move.to }));
             }
         } else {
             console.error('Không tìm thấy hàm getNextMove(state, helpers, log)');
@@ -155,7 +170,8 @@ ${code}
             success: true,
             botHandler: {
                 lang: 'javascript',
-                scriptPath
+                scriptPath,
+                enginePath: enginePathHost      // mounted read-only in the sandbox: the wrapper requires it for helpers
             }
         };
     }
@@ -170,7 +186,13 @@ ${code}
  * @param {number} timeoutMs Execution timeout in ms
  * @returns {Promise<{ move: object|null, log: string, elapsed: number, error?: string }>}
  */
-function executeBotMove(botHandler, state, timeoutMs = 2500) {
+async function executeBotMove(botHandler, state, timeoutMs = 2500) {
+    await botSlots.acquire();
+    try { return await runBotOnce(botHandler, state, timeoutMs); }
+    finally { botSlots.release(); }
+}
+
+function runBotOnce(botHandler, state, timeoutMs) {
     return new Promise((resolve) => {
         const startTime = Date.now();
         const spec = sandbox.wrapRun(botHandler, { pythonCmd: PYTHON_CMD });
@@ -198,6 +220,7 @@ function executeBotMove(botHandler, state, timeoutMs = 2500) {
             try { child.kill('SIGKILL'); } catch (e) {}
         }, timeoutMs);
 
+        liveChildren.add(child);
         let outputTooBig = false;
         const capture = (data, which) => {
             if (outputTooBig) return;
@@ -212,6 +235,7 @@ function executeBotMove(botHandler, state, timeoutMs = 2500) {
         child.stdin.on('error', () => { /* bot exited without reading stdin (EPIPE) - handled by 'close' */ });
 
         child.on('close', (code) => {
+            liveChildren.delete(child);
             clearTimeout(timer);
             const elapsed = Date.now() - startTime;
 
@@ -241,8 +265,10 @@ function executeBotMove(botHandler, state, timeoutMs = 2500) {
                     const line = lines[i].trim();
                     if (line.startsWith('{') && line.endsWith('}')) {
                         const parsed = JSON.parse(line);
-                        if (parsed.from && parsed.to && parsed.from.r !== undefined && parsed.to.r !== undefined) {
-                            foundMove = parsed;
+                        // `to` is always required; `from` only exists in games where pieces move (the game checks it)
+                        if (parsed.to && parsed.to.r !== undefined && parsed.to.c !== undefined &&
+                            (parsed.from === undefined || (parsed.from && parsed.from.r !== undefined))) {
+                            foundMove = parsed.from ? { from: parsed.from, to: parsed.to } : { to: parsed.to };
                             break;
                         }
                     }
@@ -273,6 +299,7 @@ function executeBotMove(botHandler, state, timeoutMs = 2500) {
         });
 
         child.on('error', (err) => {
+            liveChildren.delete(child);
             clearTimeout(timer);
             const missing = err.code === 'ENOENT' && botHandler.lang === 'python' ? HINTS.python : null;
             resolve({
@@ -312,7 +339,16 @@ function cleanupTempDir() {
     } catch (e) {}
 }
 
+/** Kill every bot process that is still running (graceful shutdown). */
+function killAll() {
+    for (const c of liveChildren) { try { c.kill('SIGKILL'); } catch (e) { /* already gone */ } }
+    liveChildren.clear();
+}
+const getStats = () => ({ bots: botSlots.stats(), compiles: sandbox.getCompileStats() });
+
 module.exports = {
+    killAll,
+    getStats,
     detectToolchains,
     getToolchains,
     getSandboxStatus: sandbox.getStatus,

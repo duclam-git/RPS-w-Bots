@@ -80,3 +80,38 @@ test('engine: replayAndValidate rejects illegal / out-of-turn moves and derives 
     const illegal = E.replayAndValidate([{ player: 1, from: { r: 0, c: 0 }, to: { r: 5, c: 5 } }]);
     assert.strictEqual(illegal.ok, false);
 });
+
+
+test('separateGroups: groupmates are pulled apart in round one, seeding is left alone when nothing clashes', () => {
+    const q = ['A1', 'B1', 'C1', 'D1', 'D2', 'C2', 'B2', 'A2'];
+    const groupOf = Object.fromEntries(q.map(x => [x, x[0]]));
+    const slots = T.seedOrder(8).map(seed => q[seed - 1]);
+    const before = []; for (let i = 0; i < 8; i += 2) before.push(groupOf[slots[i]] === groupOf[slots[i + 1]]);
+    assert.deepStrictEqual(before, [true, true, true, true], 'this is the real-world case that used to produce four rematches');
+    const out = T.separateGroups(slots, groupOf);
+    for (let i = 0; i < 8; i += 2) assert.notStrictEqual(groupOf[out[i]], groupOf[out[i + 1]], `${out[i]} v ${out[i + 1]}`);
+    assert.deepStrictEqual([...out].sort(), [...slots].sort(), 'nobody lost or duplicated');
+
+    const fine = ['A1', 'B2', 'B1', 'A2'];
+    const g2 = { A1: 'A', A2: 'A', B1: 'B', B2: 'B' };
+    assert.deepStrictEqual(T.separateGroups(fine, g2), fine, 'already fine -> untouched');
+    // byes (null) never count as a clash; a single group cannot be separated and is returned intact
+    assert.deepStrictEqual(T.separateGroups(['A1', null, 'B1', 'A2'], { A1: 'A', A2: 'A', B1: 'B' }), ['A1', null, 'B1', 'A2']);
+    assert.deepStrictEqual(T.separateGroups(['X1', 'X2'], { X1: 'X', X2: 'X' }), ['X1', 'X2']);
+});
+
+test('standings: head-to-head beats the seed; cyclic results stay "unresolved"', () => {
+    const entries = [['A', 2], ['B', 1], ['C', 3], ['D', 4]].map(([name, seed], i) => ({ id: i + 1, name, seed }));
+    const id = (n) => entries.find(e => e.name === n).id;
+    const g = (a, b, winner) => ({ entry_a: id(a), entry_b: id(b), wins_a: winner === a ? 1 : 0, wins_b: winner === b ? 1 : 0, draws: 0, winner_entry: id(winner), status: 'done' });
+    const st = T.computeStandings(entries, [g('A', 'B', 'A'), g('A', 'C', 'C'), g('A', 'D', 'A'), g('B', 'C', 'B'), g('B', 'D', 'B'), g('C', 'D', 'D')]);
+    // A and B are level on points / game difference / games won; B has the better seed but A beat B
+    assert.deepStrictEqual(st.map(r => r.name), ['A', 'B', 'D', 'C']);
+    assert.ok(!st[0].tied_unresolved, 'head-to-head resolved it');
+
+    const cyc = T.computeStandings(entries.slice(0, 3), [
+        { entry_a: 1, entry_b: 2, wins_a: 2, wins_b: 0, draws: 0, winner_entry: 1, status: 'done' },
+        { entry_a: 2, entry_b: 3, wins_a: 2, wins_b: 0, draws: 0, winner_entry: 2, status: 'done' },
+        { entry_a: 3, entry_b: 1, wins_a: 2, wins_b: 0, draws: 0, winner_entry: 3, status: 'done' }]);
+    assert.ok(cyc.every(r => r.tied_unresolved), 'a rock-paper-scissors cycle cannot be resolved by head-to-head');
+});

@@ -50,6 +50,10 @@ Nếu bubblewrap có mà không chạy được (Ubuntu 24.04 hạn chế user n
 - Trên tầng cơ bản, bot vẫn thấy được vài thứ không nhạy cảm (tên thư viện hệ thống, `process.version`…), và C++ không được cách ly.
 - Test: `test/sandbox.test.js` chạy bot tấn công (đọc bí mật, ghi file máy chủ, mở socket, tạo tiến trình, vòng lặp vô hạn, ngốn RAM) trên mọi tầng có sẵn và kiểm tra **máy chủ không bị đụng tới**. Có đối chứng: tắt sandbox thì cùng bot C++ đọc được bí mật, ghi được file và kết nối được mạng.
 
-## 6. Lỗi tìm thấy trong lúc làm
+## 6. Bề mặt mạng (ngoài sandbox)
+
+Xem `DEPLOY.md`: giới hạn WebSocket theo IP/sự kiện, chặn chiếm WebSocket từ trang lạ (Origin), header bảo mật/CSP, CORS đóng mặc định, IP thật sau proxy (`TRUST_PROXY`), trần tổng số tiến trình bot và số lần biên dịch. Đáng nói nhất: trước bản này **một gói tin socket sai định dạng từ người chưa đăng nhập làm sập cả server** (destructuring `undefined` trong handler không được bắt); giờ mọi payload được ép thành object và mọi handler bọc try/catch, có test.
+
+## 7. Lỗi tìm thấy trong lúc làm
 - Audit-hook Python lúc đầu chặn *đọc file* nhưng quên *liệt kê thư mục*: bot Python liệt kê được thư mục dự án. Đã chặn; có test.
 - Race ở thao tác "Đấu lại / xử thắng": ngay khi giải kết thúc hoặc vừa tạm dừng, vòng lặp nền còn sống tối đa 250 ms nên thao tác bị từ chối hoặc "Chạy" im lặng không làm gì. Vòng lặp giờ tự dừng khi giải xong và các thao tác chỉnh sửa chờ nó dừng hẳn.

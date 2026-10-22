@@ -153,6 +153,32 @@ const MIGRATIONS = [
     ALTER TABLE matches ADD COLUMN red_user_id  INTEGER;
     CREATE INDEX idx_matches_buser ON matches(blue_user_id);
     CREATE INDEX idx_matches_ruser ON matches(red_user_id);
+    `,
+    // v3: more than one game. Placement games (Caro) have no "from" square, so match_moves.from_* become nullable
+    // (SQLite cannot drop NOT NULL in place: rebuild the table, keeping every existing row).
+    `
+    ALTER TABLE tournaments ADD COLUMN game TEXT NOT NULL DEFAULT 'rps';
+    ALTER TABLE matches     ADD COLUMN game TEXT NOT NULL DEFAULT 'rps';
+    CREATE INDEX idx_matches_game ON matches(game, created_at DESC);
+
+    CREATE TABLE match_moves_v3 (
+        match_id   INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+        ply        INTEGER NOT NULL,
+        player     INTEGER NOT NULL,
+        from_r     INTEGER,
+        from_c     INTEGER,
+        to_r       INTEGER NOT NULL,
+        to_c       INTEGER NOT NULL,
+        piece      TEXT,
+        capture    TEXT,
+        elapsed_ms INTEGER,
+        fallback   INTEGER NOT NULL DEFAULT 0,
+        log        TEXT,
+        PRIMARY KEY (match_id, ply)
+    ) WITHOUT ROWID;
+    INSERT INTO match_moves_v3 SELECT match_id, ply, player, from_r, from_c, to_r, to_c, piece, capture, elapsed_ms, fallback, log FROM match_moves;
+    DROP TABLE match_moves;
+    ALTER TABLE match_moves_v3 RENAME TO match_moves;
     `
 ];
 
@@ -172,10 +198,10 @@ migrate();
 const WINNER_TEXT = { 1: 'blue', 2: 'red', draw: 'draw' };
 
 const insertMatchStmt = db.prepare(`
-    INSERT INTO matches (kind, tournament_id, series_id, game_no, blue_name, red_name, blue_lang, red_lang,
+    INSERT INTO matches (game, kind, tournament_id, series_id, game_no, blue_name, red_name, blue_lang, red_lang,
                          blue_entry_id, red_entry_id, blue_user_id, red_user_id,
                          winner, reason, plies, rules_json, duration_ms, created_at)
-    VALUES (@kind, @tournament_id, @series_id, @game_no, @blue_name, @red_name, @blue_lang, @red_lang,
+    VALUES (@game, @kind, @tournament_id, @series_id, @game_no, @blue_name, @red_name, @blue_lang, @red_lang,
             @blue_entry_id, @red_entry_id, @blue_user_id, @red_user_id,
             @winner, @reason, @plies, @rules_json, @duration_ms, @created_at)
 `);
@@ -194,6 +220,7 @@ const insertMoveStmt = db.prepare(`
 function saveMatch(m, moves) {
     return db.transaction(() => {
         const info = insertMatchStmt.run({
+            game: m.game || 'rps',
             kind: m.kind,
             tournament_id: m.tournamentId || null,
             series_id: m.seriesId || null,
@@ -219,7 +246,7 @@ function saveMatch(m, moves) {
                 match_id: matchId,
                 ply: mv.ply || i + 1,
                 player: mv.player,
-                from_r: mv.from.r, from_c: mv.from.c,
+                from_r: mv.from ? mv.from.r : null, from_c: mv.from ? mv.from.c : null,
                 to_r: mv.to.r, to_c: mv.to.c,
                 piece: mv.pieceType || null,
                 capture: mv.capture || null,
@@ -240,6 +267,7 @@ function listMatches(filters = {}) {
     const where = [];
     const params = {};
     if (filters.kind) { where.push('m.kind = @kind'); params.kind = filters.kind; }
+    if (filters.game) { where.push('m.game = @game'); params.game = filters.game; }
     if (filters.tournamentId) { where.push('m.tournament_id = @tid'); params.tid = filters.tournamentId; }
     if (filters.seriesId) { where.push('m.series_id = @sid'); params.sid = filters.seriesId; }
     if (filters.userId) {
@@ -256,7 +284,7 @@ function listMatches(filters = {}) {
 
     const total = db.prepare(`SELECT COUNT(*) AS n FROM matches m ${clause}`).get(params).n;
     const rows = db.prepare(`
-        SELECT m.id, m.kind, m.tournament_id AS tournamentId, t.name AS tournamentName, m.series_id AS seriesId,
+        SELECT m.id, m.game, m.kind, m.tournament_id AS tournamentId, t.name AS tournamentName, m.series_id AS seriesId,
                m.game_no AS gameNo, m.blue_name AS blueName, m.red_name AS redName,
                m.blue_lang AS blueLang, m.red_lang AS redLang,
                m.winner, m.reason, m.plies, m.duration_ms AS durationMs, m.created_at AS createdAt,
@@ -284,12 +312,13 @@ function getMatch(id) {
         FROM match_moves WHERE match_id = ? ORDER BY ply
     `).all(id).map(r => ({
         ply: r.ply, player: r.player,
-        from: { r: r.fr, c: r.fc }, to: { r: r.tr, c: r.tc },
+        from: r.fr == null ? null : { r: r.fr, c: r.fc }, to: { r: r.tr, c: r.tc },
         pieceType: r.piece, capture: r.capture,
         elapsedMs: r.elapsedMs, fallback: !!r.fallback, log: r.log || ''
     }));
     return {
         id: m.id,
+        game: m.game,
         kind: m.kind,
         tournamentId: m.tournament_id,
         tournamentName: m.tournament_name,
@@ -307,4 +336,4 @@ function getMatch(id) {
     };
 }
 
-module.exports = { db, saveMatch, listMatches, getMatch };
+module.exports = { db, saveMatch, listMatches, getMatch, MIGRATIONS };
