@@ -1,0 +1,11 @@
+# OTTv2 Code Arena behind Caddy (automatic HTTPS).  Run the app with TRUST_PROXY=1 COOKIE_SECURE=1
+arena.example.com {
+    encode zstd gzip
+    request_body {
+        max_size 2MB
+    }
+    reverse_proxy 127.0.0.1:3000 {
+        # Caddy sends the real client address in X-Forwarded-For and keeps Host intact; WebSockets just work.
+        flush_interval -1
+    }
+}

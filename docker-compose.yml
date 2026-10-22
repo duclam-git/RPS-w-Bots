@@ -1,0 +1,34 @@
+# NOT run in the development environment this was written in (no Docker): test before relying on it.
+# Copy .env.example to .env first. Put nginx/Caddy (deploy/) in front for HTTPS; this binds to localhost only.
+services:
+  arena:
+    build: .
+    init: true
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TRUST_PROXY: "1"            # the reverse proxy in front is ONE hop
+      COOKIE_SECURE: "1"          # users reach the site over HTTPS through the proxy
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ott-data:/app/data        # SQLite database + backups
+    # Bubblewrap (the strong bot sandbox) needs unprivileged user namespaces, which Docker's default seccomp
+    # profile (and AppArmor on Ubuntu hosts) forbid. These two lines allow it; the container still runs
+    # unprivileged with every capability dropped. If you refuse this trade-off, set SANDBOX=builtin and
+    # SANDBOX_STRICT= (empty) and accept the weaker "basic" tier - see docs/SECURITY.md.
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+      - /app/temp_bots:size=256m,uid=1000,gid=1000
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: 2
+    stop_grace_period: 20s        # SIGTERM -> graceful shutdown; tournaments resume after restart
+
+volumes:
+  ott-data:
