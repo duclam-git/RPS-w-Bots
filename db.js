@@ -179,6 +179,12 @@ const MIGRATIONS = [
     INSERT INTO match_moves_v3 SELECT match_id, ply, player, from_r, from_c, to_r, to_c, piece, capture, elapsed_ms, fallback, log FROM match_moves;
     DROP TABLE match_moves;
     ALTER TABLE match_moves_v3 RENAME TO match_moves;
+    `,
+    // v4: admin login is two-step (password, then ADMIN_KEY). A session only carries admin rights when it was
+    // opened through that second step. Sessions of existing admins predate it, so they are signed out once.
+    `
+    ALTER TABLE sessions ADD COLUMN admin_verified INTEGER NOT NULL DEFAULT 0;
+    DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE role = 'admin');
     `
 ];
 

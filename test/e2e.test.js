@@ -50,7 +50,7 @@ async function waitFinished(tid, timeoutMs = 120000) {
 test.before(async () => {
     server = spawn(process.execPath, ['server.js'], {
         cwd: path.join(__dirname, '..'),
-        env: { ...process.env, PORT: String(PORT), DB_PATH: DB, ADMIN_KEY: ADMIN, DISABLE_RATE_LIMIT: '1', LEADERBOARD_PATH: LB },
+        env: { ...process.env, PORT: String(PORT), DB_PATH: DB, ADMIN_KEY: ADMIN, DISABLE_RATE_LIMIT: '1', ADMIN_KEY_HEADER: '1', ALLOW_GUEST_ROOMS: '1', ADMIN_PASSWORD: 'admin-pass-123', LEADERBOARD_PATH: LB },
         stdio: ['ignore', 'pipe', 'pipe']
     });
     await new Promise((resolve, reject) => {
@@ -231,4 +231,60 @@ test('local (browser) match: a genuine finished game is accepted, stored and rep
     assert.strictEqual(m.moves.length, moves.length);
     const list = (await call('GET', '/api/matches?kind=local&player=tactical')).json;
     assert.ok(list.rows.some(r => r.id === out.json.id));
+});
+
+test('online room: a player leaving mid-match does not cancel it (result still saved); spectators cannot cancel it', async () => {
+    const { io } = require('socket.io-client');
+    const a = io(BASE, { transports: ['websocket'] });
+    const b = io(BASE, { transports: ['websocket'] });
+    const spec = io(BASE, { transports: ['websocket'] });
+    const once = (sock, ev) => new Promise(res => sock.once(ev, res));
+
+    const created = once(a, 'room_created');
+    a.emit('create_room', { playerName: 'Stayer', lang: 'javascript' });
+    const { roomCode } = await created;
+    const joined = once(b, 'room_joined');
+    b.emit('join_room', { roomCode, playerName: 'Quitter', lang: 'javascript' });
+    await joined;
+    const watching = once(spec, 'room_joined');
+    spec.emit('join_room', { roomCode, playerName: 'Watcher' });
+    assert.strictEqual((await watching).slot, 'spectator');
+
+    const firstMove = once(a, 'online_move_made');
+    const finished = once(a, 'online_match_finished');
+    const aborted = new Promise(res => a.once('match_error', res));
+    a.emit('player_ready', { code: RUSHER, lang: 'javascript' });
+    b.emit('player_ready', { code: RUSHER, lang: 'javascript' });
+    await firstMove;
+
+    const refused = once(spec, 'join_error');
+    spec.emit('request_rematch');
+    assert.match(await refused, /người chơi/);
+
+    const left = once(a, 'player_left_match');
+    b.close();
+    assert.match((await left).message, /Quitter/);
+
+    const result = await Promise.race([finished, aborted.then(m => { throw new Error('match aborted: ' + m); })]);
+    a.close(); spec.close();
+    assert.ok(result.matchId);
+    const m = (await call('GET', `/api/matches/${result.matchId}`)).json;
+    assert.strictEqual(m.red.name, 'Quitter');
+    assert.ok(m.reason && m.moves.length > 1, 'the match was played to its end');
+});
+
+test('server-side bot runs (/api/run-bot-move) need a logged-in account', async () => {
+    const body = { lang: 'javascript', code: RANDOM, state: { legalMoves: [] }, game: 'rps' };
+    assert.strictEqual((await call('POST', '/api/run-bot-move', body)).status, 401);
+
+    const reg = await fetch(BASE + '/api/auth/register', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: 'Runner_Probe', password: 'password-123' })
+    });
+    assert.strictEqual(reg.status, 201);
+    const cookie = reg.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
+    const res = await fetch(BASE + '/api/run-bot-move', {
+        method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body)
+    });
+    assert.notStrictEqual(res.status, 401);
 });

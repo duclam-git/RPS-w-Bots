@@ -13,6 +13,8 @@ Bot là **code do người khác viết, chạy ngay trên máy chủ**. Không 
 | Biên dịch C++ | `g++` cũng chạy trong namespace (giới hạn RAM/CPU/file, không thấy `/etc`, `data/`…) | `g++` chỉ có `ulimit` |
 | Chi phí | ~+10–25 ms mỗi nước đi | ~+10–20 ms |
 
+**Code bot JavaScript trong trình duyệt** (luyện tập, bot đấu bot): chạy trong Web Worker `bot_worker.js`. File này được phục vụ với CSP riêng `default-src 'none'; script-src 'self' 'unsafe-eval'` → code chạy được nhưng **không có mạng** (không gọi được API bằng cookie của người chơi), không có DOM/cookie/localStorage; bot lặp vô hạn chỉ làm treo worker và bị trang hủy sau 3 giây. Trang chính vẫn cấm `eval`. (Bản v5 chạy bot bằng `new Function` ngay trên trang nên bị chính CSP chặn — mọi bot JS khi luyện tập, kể cả bot có sẵn, đều âm thầm đi ngẫu nhiên.)
+
 Luôn áp dụng (mọi tầng): bot không thừa hưởng biến môi trường của server (`ADMIN_KEY`…), output tối đa 1 MB, kill đúng hạn, quét `#include "/etc/…"`/`"../…"` ở mã C++.
 
 Đo thực tế (trung vị 25 nước, máy dev): tắt sandbox 44/30/3 ms (JS/Python/C++), cơ bản 52/49/5, mạnh 60/56/11.
@@ -36,6 +38,7 @@ Nếu bubblewrap có mà không chạy được (Ubuntu 24.04 hạn chế user n
 | `SANDBOX_STRICT=1` | ngôn ngữ nào không được cách ly **mạnh** thì bị từ chối ở đăng ký giải / phòng online / luyện tập (khuyến nghị khi mở ra Internet) |
 | `SANDBOX_MEM_MB` (512), `SANDBOX_CPU_SEC` (10), `SANDBOX_COMPILE_MEM_MB` (2048) | giới hạn tài nguyên |
 | `ALLOW_LOCAL_RUN=0` | tắt hẳn `/api/run-bot-move` (luyện tập Python/C++ qua server) |
+| `LOCAL_RUN_PER_MIN` / `LOCAL_RUN_PARALLEL` / `LOCAL_NEW_CODE_PER_MIN` | hạn mức `/api/run-bot-move` cho mỗi tài khoản (mặc định 600 / 2 / 20) |
 
 ## 4. Khuyến nghị theo cách triển khai
 

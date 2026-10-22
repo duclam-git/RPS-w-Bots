@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTTv2 — Đăng nhập</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="arena.css">
+    <link rel="stylesheet" href="portal.css">
+    <script>if (localStorage.getItem('ott_theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');</script>
+</head>
+
+<body class="auth-page">
+    <main class="auth-shell">
+        <section class="auth-brand">
+            <div class="auth-logo">⚔️ OTTv2 CODE ARENA</div>
+            <h1>Lập trình bot, đấu online, leo bảng xếp hạng.</h1>
+            <ul class="auth-points">
+                <li>✊✋✌️ <strong>Oẳn tù tì 9×9</strong> — đưa quân tới ô đích của đối thủ</li>
+                <li>⚫⚪ <strong>Cờ Caro</strong> — 5 quân liên tiếp là thắng</li>
+                <li>🤖 Viết bot bằng JavaScript, Python hoặc C++</li>
+                <li>🏆 Giải đấu loại trực tiếp, vòng tròn, chia bảng</li>
+            </ul>
+            <p class="small muted">Mới chơi lần đầu? Đọc <a href="guide.html">hướng dẫn luật chơi &amp; cách viết bot</a>.</p>
+        </section>
+
+        <section class="card auth-card" aria-live="polite">
+            <!-- step 1: username + password (players and admins use the same form) -->
+            <div id="step-credentials">
+                <div class="auth-tabs" role="tablist">
+                    <button class="btn btn-primary" id="tab-login" role="tab" aria-selected="true">Đăng nhập</button>
+                    <button class="btn" id="tab-register" role="tab" aria-selected="false">Tạo tài khoản</button>
+                </div>
+                <form id="cred-form" novalidate>
+                    <label>Tên đăng nhập
+                        <input id="f-user" name="username" autocomplete="username" maxlength="20" required placeholder="3–20 ký tự: chữ, số, . _ -">
+                    </label>
+                    <label>Mật khẩu
+                        <input id="f-pass" name="password" type="password" autocomplete="current-password" maxlength="128" required placeholder="Tối thiểu 8 ký tự">
+                    </label>
+                    <label id="row-pass2" hidden>Nhập lại mật khẩu
+                        <input id="f-pass2" type="password" autocomplete="new-password" maxlength="128">
+                    </label>
+                    <div id="cred-msg" class="auth-msg" role="alert"></div>
+                    <button class="btn btn-primary auth-submit" id="cred-submit" type="submit">Đăng nhập</button>
+                </form>
+            </div>
+
+            <!-- step 2: only for admin accounts, after the password was accepted -->
+            <div id="step-admin" hidden>
+                <h2>🛡 Xác thực quản trị</h2>
+                <p class="small muted">Mật khẩu của <strong id="admin-name">admin</strong> đã đúng. Tài khoản quản trị cần thêm <strong>khóa admin</strong> (ADMIN_KEY của máy chủ) để mở phiên làm việc. Phiên này hết hạn sau <span id="admin-ttl">2</span> phút.</p>
+                <form id="admin-form" novalidate>
+                    <label>Khóa admin
+                        <input id="f-key" type="password" autocomplete="one-time-code" maxlength="200" required>
+                    </label>
+                    <div id="admin-msg" class="auth-msg" role="alert"></div>
+                    <div class="row">
+                        <button class="btn btn-primary auth-submit" id="admin-submit" type="submit">Xác nhận</button>
+                        <button class="btn btn-ghost" id="admin-cancel" type="button">← Quay lại</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </main>
+    <script src="login.js"></script>
+</body>
+
+</html>

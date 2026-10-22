@@ -445,6 +445,10 @@
     }
 
     // ===== Bot Code Execution Sandbox =====
+    // JavaScript bots run in a Web Worker (bot_worker.js): the page CSP forbids eval, the worker has no network
+    // access, and an endless loop is killed after the time limit instead of freezing the page.
+    const botRunner = window.BotWorker ? new window.BotWorker('rps') : null;
+    const BROWSER_MOVE_LIMIT_MS = 3000;
 
     function getBotCode(player) {
         const ctrl = player === 1 ? controllers.blue : controllers.red;
@@ -539,19 +543,13 @@
             } catch (err) {
                 botError = err;
             }
+        } else if (botRunner) {
+            const res = await botRunner.run(codeString, state, BROWSER_MOVE_LIMIT_MS);
+            (res.logs || []).forEach(msg => currentLogs.push(msg));
+            if (res.move) rawMove = res.move;
+            else botError = new Error(res.error || 'Bot không trả về nước đi');
         } else {
-            try {
-                const botWrapper = new Function('state', 'helpers', 'log', `
-                    ${codeString}
-                    if (typeof getNextMove !== 'function') {
-                        throw new Error("Bot code must define 'function getNextMove(state, helpers, log)'.");
-                    }
-                    return getNextMove(state, helpers, log);
-                `);
-                rawMove = botWrapper(state, helpers, logger);
-            } catch (err) {
-                botError = err;
-            }
+            botError = new Error('Trình duyệt không hỗ trợ Web Worker');
         }
         const elapsedMs = (performance.now() - startTime).toFixed(1);
 
@@ -1224,118 +1222,15 @@
 
         let completed = 0;
 
-        function simulateSingleMatch() {
-            let simBoard = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
-            const { p1, p2 } = getInitialPieces();
-            p1.forEach(p => simBoard[p.r][p.c] = { player: 1, type: p.t });
-            p2.forEach(p => simBoard[p.r][p.c] = { player: 2, type: p.t });
-
-            let curPlayer = 1;
-            let matchTurns = 0;
-            const maxTurns = 250;
-
-            const codeBlue = getBotCode(1);
-            const codeRed = getBotCode(2);
-
-            let fnBlue, fnRed;
-            try {
-                fnBlue = new Function('state', 'helpers', 'log', `${codeBlue}\nreturn getNextMove(state, helpers, log);`);
-            } catch (e) {
-                fnBlue = (state, helpers) => helpers.randomChoice(state.legalMoves);
-            }
-            try {
-                fnRed = new Function('state', 'helpers', 'log', `${codeRed}\nreturn getNextMove(state, helpers, log);`);
-            } catch (e) {
-                fnRed = (state, helpers) => helpers.randomChoice(state.legalMoves);
-            }
-
-            const helpers = {
-                canCapture,
-                distance: (r1, c1, r2, c2) => Math.max(Math.abs(r1 - r2), Math.abs(c1 - c2)),
-                manhattanDistance: (r1, c1, r2, c2) => Math.abs(r1 - r2) + Math.abs(c1 - c2),
-                toColumnName,
-                toNotation,
-                fromNotation,
-                cloneBoard,
-                simulateMove,
-                getLegalMoves: (p, b) => getLegalMoves(p, b),
-                checkWin: (b) => checkWin(b),
-                randomChoice: (arr) => arr[Math.floor(Math.random() * arr.length)],
-                getPieceCounts: (p, b) => getPieceCounts(p, b),
-                getPieces: (p, b) => getPieces(p, b)
-            };
-            const dummyLog = () => {};
-
-            while (matchTurns < maxTurns) {
-                const legalMoves = getLegalMoves(curPlayer, simBoard);
-                if (legalMoves.length === 0) break;
-
-                const state = {
-                    board: cloneBoard(simBoard),
-                    myPlayer: curPlayer,
-                    opponentPlayer: curPlayer === 1 ? 2 : 1,
-                    myGoal: curPlayer === 1 ? { ...BLUE_GOAL } : { ...RED_GOAL },
-                    opponentGoal: curPlayer === 1 ? { ...RED_GOAL } : { ...BLUE_GOAL },
-                    legalMoves: legalMoves,
-                    moveHistory: [],
-                    capturedByMe: [],
-                    capturedByOpponent: [],
-                    myCounts: getPieceCounts(curPlayer, simBoard),
-                    opponentCounts: getPieceCounts(curPlayer === 1 ? 2 : 1, simBoard),
-                    turnNumber: Math.ceil((matchTurns + 1) / 2)
-                };
-
-                let move = null;
-                try {
-                    const fn = curPlayer === 1 ? fnBlue : fnRed;
-                    const res = fn(state, helpers, dummyLog);
-                    if (res && res.from && res.to) {
-                        move = legalMoves.find(m =>
-                            m.from.r === res.from.r && m.from.c === res.from.c &&
-                            m.to.r === res.to.r && m.to.c === res.to.c
-                        );
-                    }
-                } catch (e) {
-                    move = null;
-                }
-
-                if (!move) move = helpers.randomChoice(legalMoves);
-
-                // Execute on simBoard
-                simBoard[move.to.r][move.to.c] = simBoard[move.from.r][move.from.c];
-                simBoard[move.from.r][move.from.c] = null;
-                matchTurns++;
-
-                const winCheck = checkWin(simBoard);
-                if (winCheck.winner !== null) {
-                    totalTurns += matchTurns;
-                    if (winCheck.winner === 1) {
-                        blueWins++;
-                        if (winCheck.reason.includes(toNotation(BLUE_GOAL.r, BLUE_GOAL.c))) blueGoalWins++;
-                    } else if (winCheck.winner === 2) {
-                        redWins++;
-                        if (winCheck.reason.includes(toNotation(RED_GOAL.r, RED_GOAL.c))) redGoalWins++;
-                    } else {
-                        draws++;
-                    }
-                    return;
-                }
-
-                curPlayer = curPlayer === 1 ? 2 : 1;
-            }
-
-            draws++;
-            totalTurns += matchTurns;
+        // Games run inside the bot worker (bot_worker.js) with the server's rules engine; the page only counts.
+        function recordResult(res) {
+            totalTurns += res.plies;
+            if (res.winner === 1) { blueWins++; if (res.reason && res.reason.includes(toNotation(BLUE_GOAL.r, BLUE_GOAL.c))) blueGoalWins++; else blueExtinctionWins++; }
+            else if (res.winner === 2) { redWins++; if (res.reason && res.reason.includes(toNotation(RED_GOAL.r, RED_GOAL.c))) redGoalWins++; else redExtinctionWins++; }
+            else draws++;
         }
 
-        // Run batch in chunks of 5 using requestAnimationFrame / setTimeout
         function runChunk() {
-            const chunkSize = Math.min(5, matchCount - completed);
-            for (let i = 0; i < chunkSize; i++) {
-                simulateSingleMatch();
-                completed++;
-            }
-
             const pct = Math.round((completed / matchCount) * 100);
             if (progressEl) progressEl.style.width = `${pct}%`;
             if (progressText) progressText.textContent = `${completed} / ${matchCount} trận (${pct}%)`;
@@ -1343,9 +1238,7 @@
             if (redWinsEl) redWinsEl.textContent = `${redWins} (${Math.round((redWins / completed) * 100)}%)`;
             if (drawsEl) drawsEl.textContent = `${draws} (${Math.round((draws / completed) * 100)}%)`;
 
-            if (completed < matchCount) {
-                setTimeout(runChunk, 15);
-            } else {
+            if (completed >= matchCount) {
                 isSimulating = false;
                 if (startSimBtn) startSimBtn.disabled = false;
                 const statsEl = document.getElementById('sim-final-stats');
@@ -1370,7 +1263,20 @@
             }
         }
 
-        runChunk();
+        if (!botRunner) { isSimulating = false; if (startSimBtn) startSimBtn.disabled = false; return; }
+        const nonJs = [[1, blueLang, controllers.blue], [2, redLang, controllers.red]].filter(([, l, c]) => c === 'custom' && l !== 'javascript');
+        if (nonJs.length) updateStatusTicker('⚠️ Mô phỏng nhanh chỉ chạy được code JavaScript trong trình duyệt; code Python/C++ sẽ đi ngẫu nhiên.');
+        botRunner.simulate({ codeBlue: getBotCode(1), codeRed: getBotCode(2), count: matchCount, rules: { maxPlies: 250 } }, (res) => {
+            recordResult(res);
+            completed++;
+            runChunk();
+        }).then(out => {
+            if (out && out.ok === false) {
+                isSimulating = false;
+                if (startSimBtn) startSimBtn.disabled = false;
+                if (progressText) progressText.textContent = `⚠️ ${out.error}`;
+            }
+        });
     }
 
     // ===== Multi-Language Ace Editor & Templates =====
@@ -1404,6 +1310,8 @@
         if (window.ace) {
             try {
                 if (window.__aceBase) window.ace.config.set('basePath', window.__aceBase);
+                // CSP forbids blob: workers; load Ace's syntax-check worker from this server instead
+                window.ace.config.set('loadWorkerFromBlob', false);
                 editorBlue = window.ace.edit("editor-blue");
                 editorBlue.setTheme(editorTheme);
                 editorBlue.session.setMode(MODE_MAP[blueLang] || "ace/mode/javascript");
@@ -1545,7 +1453,7 @@
 
     // ===== Player Profile & Leaderboard =====
 
-    // ===== Account (login lives on arena.html; the session cookie is shared by both pages) =====
+    // ===== Account (login lives on login.html; the session cookie is shared by every page) =====
     let accountUser = null;
 
     async function syncAccount() {
@@ -1561,7 +1469,7 @@
                 link.title = `Đăng nhập với tên ${accountUser.username} — xem hồ sơ & thành tích`;
             } else {
                 link.textContent = '🔐 Đăng nhập';
-                link.href = 'arena.html#/login';
+                link.href = 'login.html?next=%2Findex.html';
             }
         }
         if (accountUser) {
@@ -1702,6 +1610,8 @@
             socket.on('leaderboard_data', (data) => {
                 renderLeaderboard(data);
             });
+            // logged out in another tab / password reset: this page is no longer signed in
+            socket.on('session_revoked', () => { location.replace('login.html?next=%2Findex.html'); });
             socket.on('room_created', (data) => {
                 currentOnlineRoom = data.roomCode;
                 myOnlineSlot = data.slot;
@@ -1718,6 +1628,7 @@
                 updateLobbyState(roomState);
                 updateOnlineActiveBar(roomState);
             });
+            socket.on('player_left_match', (d) => updateStatusTicker('⚠️ ' + d.message));
             socket.on('player_submitted', (data) => {
                 const isMe = data.player === myOnlineSlot;
                 const pName = data.name || (data.player === 'blue' ? 'Đội Xanh' : 'Đội Đỏ');
@@ -2341,7 +2252,8 @@
                 }
                 socket.emit('create_room', {
                     playerName: currentPlayerProfile ? currentPlayerProfile.name : 'Người chơi',
-                    lang: blueLang
+                    lang: blueLang,
+                    game: 'rps'
                 });
             });
         }
@@ -2362,7 +2274,8 @@
                 socket.emit('join_room', {
                     roomCode: code,
                     playerName: currentPlayerProfile ? currentPlayerProfile.name : 'Người chơi',
-                    lang: redLang
+                    lang: redLang,
+                    game: 'rps'
                 });
             });
         }

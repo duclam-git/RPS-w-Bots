@@ -15,35 +15,21 @@
 
 <body>
     <header class="hub-header">
-        <a class="hub-logo" href="index.html" title="Về đấu trường">⚔️ <span>OTTv2 CODE ARENA</span></a>
+        <a class="hub-logo" href="home.html" title="Về trang người chơi">⚔️ <span>OTTv2 CODE ARENA</span></a>
         <nav class="hub-nav">
-            <a href="index.html">🎮 Đấu trường</a>
+            <a href="home.html">🏠 Trang của tôi</a>
             <a href="#/tournaments" data-nav="tournaments">🏆 Giải đấu</a>
             <a href="#/matches" data-nav="matches">📜 Lịch sử trận</a>
             <a href="#/leaderboard" data-nav="leaderboard">🏅 Xếp hạng</a>
+            <a href="guide.html">📘 Hướng dẫn</a>
             <a href="#/admin" data-nav="admin" id="nav-admin" style="display:none">🛠 Quản trị</a>
         </nav>
         <div class="hub-tools">
             <button id="user-btn" class="btn btn-ghost" title="Tài khoản">🔐 Đăng nhập</button>
             <button id="logout-btn" class="btn btn-ghost" style="display:none" title="Đăng xuất">⏏</button>
-            <button id="admin-btn" class="btn btn-ghost" title="Quyền quản trị">🔑 Admin</button>
             <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện sáng/tối">🌙</button>
         </div>
     </header>
-
-    <dialog id="auth-dialog" class="auth-dialog">
-        <div class="row between"><h2 id="auth-title">Đăng nhập</h2><button class="btn btn-ghost btn-sm" id="auth-close" aria-label="Đóng">✖</button></div>
-        <div class="row" style="margin-bottom:.6rem">
-            <button class="btn btn-sm btn-primary" id="auth-tab-login">Đăng nhập</button>
-            <button class="btn btn-sm" id="auth-tab-register">Tạo tài khoản</button>
-        </div>
-        <div class="form-grid" style="grid-template-columns:1fr">
-            <label>Tên đăng nhập<input id="auth-user" autocomplete="username" maxlength="20" placeholder="3–20 ký tự: chữ, số, . _ -"></label>
-            <label>Mật khẩu<input id="auth-pass" type="password" autocomplete="current-password" maxlength="128" placeholder="Tối thiểu 8 ký tự"></label>
-        </div>
-        <div id="auth-msg" class="small" style="min-height:1.2rem;margin-bottom:.5rem"></div>
-        <button class="btn btn-primary" id="auth-submit">Đăng nhập</button>
-    </dialog>
 
     <main id="view" class="hub-main" aria-live="polite"></main>
     <div id="toast" class="toast" role="status"></div>

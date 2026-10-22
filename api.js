@@ -130,6 +130,8 @@ router.get('/matches/:id', wrap((req, res) => {
  */
 router.post('/matches/local', rateLimit({ windowMs: 60_000, max: 30 }), wrap((req, res) => {
     const { blue, red, moves, mine } = req.body || {};
+    const g = games.get(String((req.body || {}).game || games.DEFAULT_GAME));
+    if (!g) throw new HttpError(400, 'Trò chơi không tồn tại');
     if (!Array.isArray(moves) || moves.length === 0 || moves.length > 2000) throw new HttpError(400, 'Danh sách nước đi không hợp lệ');
     // sides the (logged-in) player controlled, so the game shows up in "my matches"
     const mySides = Array.isArray(mine) ? mine : [];
@@ -138,13 +140,22 @@ router.post('/matches/local', rateLimit({ windowMs: 60_000, max: 30 }), wrap((re
         lang: String((s && s.lang) || '').slice(0, 20),
         userId: req.user && mySides.includes(side) ? req.user.id : null
     });
-    const rules = engine.resolveRules({ maxPlies: 2000 });
-    const check = engine.replayAndValidate(moves.map(m => ({
+    let rules;
+    if (g.id === 'rps') rules = engine.resolveRules({ maxPlies: 2000 });
+    else {
+        // Caro practice: the player picks the board; the game's own validator decides what is acceptable
+        const raw = (req.body || {}).rules || {};
+        const v = g.validateRules({ size: raw.size, winLength: raw.winLength });
+        if (!v.ok) throw new HttpError(400, v.errors.join('; '));
+        rules = g.resolveRules(v.rules);
+    }
+    const check = g.replayAndValidate(moves.map(m => ({
         player: m && m.player, from: m && m.from, to: m && m.to
     })), rules);
     if (!check.ok) throw new HttpError(422, check.error);
 
     const id = saveMatch({
+        game: g.id,
         kind: 'local',
         blue: cleanSide(blue, 'Xanh', 'blue'),
         red: cleanSide(red, 'Đỏ', 'red'),

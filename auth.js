@@ -6,10 +6,14 @@
 //  - sockets  : Socket.io handshakes carry the same cookie -> the server knows WHO is playing
 //  - ladder   : Elo lives in the `users` table and moves only for rated games
 //               (online, both players logged in, different accounts)
+//  - admin    : ONE login page for everybody. An admin account logs in with its password and then must
+//               present the ADMIN_KEY (second factor) before a session is issued; only such sessions carry
+//               admin rights, and they expire sooner than player sessions.
 
 'use strict';
 
 const crypto = require('crypto');
+const { EventEmitter } = require('events');
 const { promisify } = require('util');
 const express = require('express');
 const { db } = require('./db');
@@ -18,15 +22,24 @@ const storage = require('./storage');
 const scrypt = promisify(crypto.scrypt);
 const SESSION_COOKIE = 'ott_session';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const ADMIN_SESSION_TTL_MS = (Number(process.env.ADMIN_SESSION_TTL_HOURS) || 8) * 60 * 60 * 1000;
+const CHALLENGE_COOKIE = 'ott_admin_challenge';
+const CHALLENGE_TTL_MS = 2 * 60 * 1000;
+const CHALLENGE_MAX_TRIES = 3;
 const USERNAME_RE = /^[A-Za-z0-9_.-]{3,20}$/;
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
 
 // ---------------------------------------------------------------------
-// Admin key (bootstrap / scripting). A logged-in user can also be promoted to role "admin"
-// by presenting the key once (POST /api/auth/claim-admin); after that the key is not needed.
+// Admin key = second factor of the admin login (asked right after the admin account's password).
+// The bare X-Admin-Key header (key alone, no password) is off unless ADMIN_KEY_HEADER=1 (scripts / CI).
 // ---------------------------------------------------------------------
 const ADMIN_KEY = process.env.ADMIN_KEY || crypto.randomBytes(9).toString('base64url');
 const ADMIN_KEY_IS_GENERATED = !process.env.ADMIN_KEY;
+const ADMIN_USERNAME = USERNAME_RE.test(process.env.ADMIN_USERNAME || '') ? process.env.ADMIN_USERNAME : 'admin';
+const adminKeyHeaderEnabled = () => process.env.ADMIN_KEY_HEADER === '1';
+
+/** Fired when sessions die (logout, password change/reset, role change) so open sockets can be closed too. */
+const events = new EventEmitter();
 
 function safeEqual(a, b) {
     const x = Buffer.from(String(a || ''));
@@ -70,12 +83,13 @@ function parseCookies(header) {
     return out;
 }
 
-function createSession(userId, userAgent) {
+function createSession(userId, userAgent, { adminVerified = false } = {}) {
     const token = crypto.randomBytes(32).toString('base64url');
     const now = Date.now();
-    db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at, user_agent) VALUES (?, ?, ?, ?, ?)')
-        .run(sha256(token), userId, now, now + SESSION_TTL_MS, String(userAgent || '').slice(0, 200));
-    return token;
+    const ttl = adminVerified ? ADMIN_SESSION_TTL_MS : SESSION_TTL_MS;
+    db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at, user_agent, admin_verified) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(sha256(token), userId, now, now + ttl, String(userAgent || '').slice(0, 200), adminVerified ? 1 : 0);
+    return { token, ttl };
 }
 
 const USER_COLUMNS = 'u.id, u.username, u.role, u.elo, u.matches, u.wins, u.losses, u.draws, u.preferred_lang, u.created_at';
@@ -83,7 +97,7 @@ const USER_COLUMNS = 'u.id, u.username, u.role, u.elo, u.matches, u.wins, u.loss
 function userFromToken(token) {
     if (!token) return null;
     return db.prepare(`
-        SELECT ${USER_COLUMNS} FROM sessions s JOIN users u ON u.id = s.user_id
+        SELECT ${USER_COLUMNS}, s.admin_verified FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ? AND s.expires_at > ?
     `).get(sha256(token), Date.now()) || null;
 }
@@ -92,14 +106,70 @@ function userFromToken(token) {
 function userFromCookieHeader(header) {
     return userFromToken(parseCookies(header)[SESSION_COOKIE]);
 }
+/** sha256 of the session token in a cookie header (lets the server close the sockets of a revoked session). */
+function sessionHashFromCookieHeader(header) {
+    const t = parseCookies(header)[SESSION_COOKIE];
+    return t ? sha256(t) : null;
+}
 
-function setSessionCookie(req, res, token) {
-    const secure = req.secure || req.get('x-forwarded-proto') === 'https' || process.env.COOKIE_SECURE === '1';
+const isSecureReq = (req) => req.secure || req.get('x-forwarded-proto') === 'https' || process.env.COOKIE_SECURE === '1';
+function setSessionCookie(req, res, token, ttlMs = SESSION_TTL_MS) {
     res.append('Set-Cookie',
-        `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}${secure ? '; Secure' : ''}`);
+        `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(ttlMs / 1000)}${isSecureReq(req) ? '; Secure' : ''}`);
 }
 function clearSessionCookie(res) {
     res.append('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+// ---------------------------------------------------------------------
+// Admin login, step 2: after the admin password is accepted the browser only gets a short-lived,
+// single-purpose challenge (HttpOnly, SameSite=Strict, scoped to /api/auth). No session exists until the
+// ADMIN_KEY is presented with it. Kept in memory: a restart simply means "log in again".
+// ---------------------------------------------------------------------
+const challenges = new Map();      // sha256(challenge) -> { userId, username, expires, tries }
+function createChallenge(row) {
+    const token = crypto.randomBytes(32).toString('base64url');
+    challenges.set(sha256(token), { userId: row.id, username: row.username, expires: Date.now() + CHALLENGE_TTL_MS, tries: 0 });
+    return token;
+}
+function setChallengeCookie(req, res, token) {
+    res.append('Set-Cookie',
+        `${CHALLENGE_COOKIE}=${encodeURIComponent(token)}; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=${CHALLENGE_TTL_MS / 1000}${isSecureReq(req) ? '; Secure' : ''}`);
+}
+function clearChallengeCookie(res) {
+    res.append('Set-Cookie', `${CHALLENGE_COOKIE}=; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=0`);
+}
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, c] of challenges) if (c.expires < now) challenges.delete(k);
+}, 60_000).unref();
+
+/**
+ * Makes sure an admin account exists (first boot): ADMIN_USERNAME (default "admin") with ADMIN_PASSWORD,
+ * or a random password printed once on the console. ADMIN_PASSWORD_RESET=1 re-applies ADMIN_PASSWORD to
+ * that account (locked-out operator) and signs it out everywhere.
+ * Returns { created, reset, username, password? (only when generated), conflict? }.
+ */
+async function ensureAdminAccount() {
+    const row = db.prepare('SELECT id, role FROM users WHERE username = ? COLLATE NOCASE').get(ADMIN_USERNAME);
+    const envPw = process.env.ADMIN_PASSWORD;
+    if (envPw !== undefined && (envPw.length < 8 || envPw.length > 128)) {
+        throw new Error('ADMIN_PASSWORD phải từ 8 đến 128 ký tự');
+    }
+    if (row) {
+        // never promote an account somebody else may have registered under that name
+        if (row.role !== 'admin') return { created: false, username: ADMIN_USERNAME, conflict: true };
+        if (process.env.ADMIN_PASSWORD_RESET === '1' && envPw) {
+            db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(await hashPassword(envPw), row.id);
+            db.prepare('DELETE FROM sessions WHERE user_id = ?').run(row.id);
+            return { created: false, reset: true, username: ADMIN_USERNAME };
+        }
+        return { created: false, username: ADMIN_USERNAME };
+    }
+    const password = envPw || crypto.randomBytes(12).toString('base64url');
+    db.prepare(`INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, 'admin', ?)`)
+        .run(ADMIN_USERNAME, await hashPassword(password), Date.now());
+    return { created: true, username: ADMIN_USERNAME, password: envPw ? undefined : password };
 }
 
 setInterval(() => {
@@ -124,7 +194,9 @@ function attachUser(req, res, next) {
     next();
 }
 
-const isAdminReq = (req) => (req.user && req.user.role === 'admin') || validAdminKey(req.get('x-admin-key'));
+/** Admin = admin account AND a session opened through the ADMIN_KEY step (or, opt-in, the scripting header). */
+const isAdminReq = (req) => (req.user && req.user.role === 'admin' && req.user.admin_verified === 1)
+    || (adminKeyHeaderEnabled() && validAdminKey(req.get('x-admin-key')));
 
 function requireUser(req, res, next) {
     if (!req.user) return res.status(401).json({ error: 'Bạn cần đăng nhập' });
@@ -208,7 +280,7 @@ function leaderboard() {
     return [...users, ...bots].sort((a, b) => b.elo - a.elo);
 }
 
-const reservedNames = () => new Set(storage.getLeaderboard().filter(p => p.isBot).map(p => p.name.toLowerCase()));
+const reservedNames = () => new Set([...storage.getLeaderboard().filter(p => p.isBot).map(p => p.name.toLowerCase()), ADMIN_USERNAME.toLowerCase()]);
 
 // ---------------------------------------------------------------------
 // Routes
@@ -225,12 +297,14 @@ function createRouter({ rateLimit }) {
         }
     };
 
-    const startSession = (req, res, userId) => {
-        const token = createSession(userId, req.get('user-agent'));
-        setSessionCookie(req, res, token);
+    const startSession = (req, res, userId, opts) => {
+        const { token, ttl } = createSession(userId, req.get('user-agent'), opts);
+        setSessionCookie(req, res, token, ttl);
         db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(Date.now(), userId);
         return token;
     };
+    // where the login page should send this account next
+    const homeFor = (user) => (user.role === 'admin' ? '/arena.html#/admin' : '/home.html');
     const userById = (id) => db.prepare(`SELECT ${USER_COLUMNS} FROM users u WHERE u.id = ?`).get(id);
 
     router.post('/auth/register', registerLimit, wrap(async (req, res) => {
@@ -254,7 +328,7 @@ function createRouter({ rateLimit }) {
             throw err;
         }
         startSession(req, res, id);
-        res.status(201).json({ user: publicUser(userById(id)) });
+        res.status(201).json({ user: publicUser(userById(id)), redirect: '/home.html' });
     }));
 
     router.post('/auth/login', loginLimit, wrap(async (req, res) => {
@@ -273,25 +347,64 @@ function createRouter({ rateLimit }) {
             return res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu' });
         }
         failures.delete(username.toLowerCase());
+        if (row.role === 'admin') {
+            // password was right, but an admin session needs the second factor first
+            setChallengeCookie(req, res, createChallenge(row));
+            return res.json({ needAdminKey: true, username: row.username, expiresInSec: CHALLENGE_TTL_MS / 1000 });
+        }
         startSession(req, res, row.id);
-        res.json({ user: publicUser(userById(row.id)) });
+        res.json({ user: publicUser(userById(row.id)), redirect: homeFor(row) });
     }));
 
+    // Admin login, step 2: ADMIN_KEY + the challenge cookie from step 1 -> admin session
+    router.post('/auth/admin-verify', loginLimit, (req, res) => {
+        const token = parseCookies(req.headers.cookie)[CHALLENGE_COOKIE];
+        const ch = token && challenges.get(sha256(token));
+        if (!ch || ch.expires < Date.now()) {
+            if (token) challenges.delete(sha256(token));
+            clearChallengeCookie(res);
+            return res.status(401).json({ error: 'Phiên xác thực admin đã hết hạn. Hãy đăng nhập lại.', restart: true });
+        }
+        const wait = lockedFor(ch.username);
+        if (wait) return res.status(429).json({ error: `Sai quá nhiều lần. Thử lại sau ${wait} giây.`, restart: true });
+        if (!validAdminKey((req.body || {}).key)) {
+            ch.tries++;
+            noteFailure(ch.username);
+            if (ch.tries >= CHALLENGE_MAX_TRIES) {
+                challenges.delete(sha256(token));
+                clearChallengeCookie(res);
+                return res.status(403).json({ error: 'Sai khóa admin quá nhiều lần. Hãy đăng nhập lại.', restart: true });
+            }
+            return res.status(403).json({ error: `Sai khóa admin (còn ${CHALLENGE_MAX_TRIES - ch.tries} lần thử)` });
+        }
+        challenges.delete(sha256(token));          // single use
+        clearChallengeCookie(res);
+        const row = userById(ch.userId);
+        if (!row || row.role !== 'admin') return res.status(403).json({ error: 'Tài khoản không còn quyền admin', restart: true });
+        failures.delete(ch.username.toLowerCase());
+        startSession(req, res, row.id, { adminVerified: true });
+        res.json({ user: publicUser(row), redirect: homeFor(row) });
+    });
+
     router.post('/auth/logout', (req, res) => {
-        if (req.sessionToken) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(req.sessionToken));
+        if (req.sessionToken) {
+            const tokenHash = sha256(req.sessionToken);
+            db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
+            events.emit('revoke', { tokenHash });
+        }
         clearSessionCookie(res);
         res.json({ ok: true });
     });
 
     router.get('/auth/me', (req, res) => {
+        res.set('Cache-Control', 'no-store');
         res.json({ user: publicUser(req.user), isAdmin: !!isAdminReq(req) });
     });
 
-    // Present the ADMIN_KEY once while logged in -> account becomes admin permanently.
-    router.post('/auth/claim-admin', requireUser, loginLimit, (req, res) => {
-        if (!validAdminKey((req.body || {}).key)) return res.status(403).json({ error: 'Sai khóa admin' });
-        db.prepare(`UPDATE users SET role = 'admin' WHERE id = ?`).run(req.user.id);
-        res.json({ ok: true });
+    // The old "any player + key = admin forever" path is gone: admin rights belong to admin accounts,
+    // and the key is their second login factor.
+    router.post('/auth/claim-admin', (req, res) => {
+        res.status(410).json({ error: 'Đã bỏ. Đăng nhập bằng tài khoản admin; khóa admin được hỏi ngay sau mật khẩu.' });
     });
 
     router.post('/auth/password', requireUser, loginLimit, wrap(async (req, res) => {
@@ -306,6 +419,7 @@ function createRouter({ rateLimit }) {
         db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(await hashPassword(newPassword), row.id);
         // sign out every other device
         db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').run(row.id, sha256(req.sessionToken));
+        events.emit('revoke', { userId: row.id, exceptTokenHash: sha256(req.sessionToken) });
         res.json({ ok: true });
     }));
 
@@ -334,6 +448,11 @@ function createRouter({ rateLimit }) {
             return res.status(409).json({ error: 'Không thể bỏ quyền của admin cuối cùng' });
         }
         db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
+        // a role change takes effect through a fresh login (a new admin must pass the ADMIN_KEY step)
+        if (target.role !== role) {
+            db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+            events.emit('revoke', { userId: id });
+        }
         res.json({ ok: true });
     });
 
@@ -347,6 +466,7 @@ function createRouter({ rateLimit }) {
         if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)) return res.status(404).json({ error: 'Không tìm thấy người dùng' });
         db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(await hashPassword(pw), id);
         db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+        events.emit('revoke', { userId: id });
         failures.clear();
         res.json({ ok: true });
     }));
@@ -367,6 +487,17 @@ function createRouter({ rateLimit }) {
             FROM matches WHERE blue_user_id = @u OR red_user_id = @u GROUP BY kind
         `).all({ u: u.id }).forEach(r => { record[r.kind] = { games: r.games, wins: r.wins, losses: r.losses, draws: r.draws }; });
 
+        // same numbers per game (player home page: "how am I doing at Caro?")
+        const byGame = {};
+        db.prepare(`
+            SELECT game,
+                   SUM(CASE WHEN (blue_user_id = @u AND winner = 'blue') OR (red_user_id = @u AND winner = 'red') THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN winner = 'draw' THEN 1 ELSE 0 END) AS draws,
+                   SUM(CASE WHEN (blue_user_id = @u AND winner = 'red') OR (red_user_id = @u AND winner = 'blue') THEN 1 ELSE 0 END) AS losses,
+                   COUNT(*) AS games
+            FROM matches WHERE blue_user_id = @u OR red_user_id = @u GROUP BY game
+        `).all({ u: u.id }).forEach(r => { byGame[r.game] = { games: r.games, wins: r.wins, losses: r.losses, draws: r.draws }; });
+
         const tournaments = db.prepare(`
             SELECT t.id, t.name, t.status, t.format, (t.champion_entry_id = e.id) AS champion
             FROM entries e JOIN tournaments t ON t.id = e.tournament_id
@@ -374,16 +505,16 @@ function createRouter({ rateLimit }) {
         `).all(u.id).map(t => ({ ...t, champion: !!t.champion }));
 
         const rank = db.prepare('SELECT COUNT(*) + 1 AS r FROM users WHERE elo > ?').get(u.elo).r;
-        res.json({ user: { ...publicUser(u), rank }, record, tournaments });
+        res.json({ user: { ...publicUser(u), rank }, record, byGame, tournaments });
     });
 
     return router;
 }
 
 module.exports = {
-    ADMIN_KEY, ADMIN_KEY_IS_GENERATED, validAdminKey, isAdminReq,
+    ADMIN_KEY, ADMIN_KEY_IS_GENERATED, ADMIN_USERNAME, validAdminKey, isAdminReq, ensureAdminAccount, events,
     attachUser, requireUser, requireAdmin, sameOriginOnly,
-    userFromCookieHeader, applyRatedResult, leaderboard, createRouter, publicUser,
+    userFromCookieHeader, sessionHashFromCookieHeader, applyRatedResult, leaderboard, createRouter, publicUser,
     // exposed for tests
     hashPassword, verifyPassword
 };

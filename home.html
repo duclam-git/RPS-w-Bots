@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTTv2 — Trang người chơi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="arena.css">
+    <link rel="stylesheet" href="portal.css">
+    <script>if (localStorage.getItem('ott_theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');</script>
+</head>
+
+<body>
+    <header class="hub-header">
+        <a class="hub-logo" href="home.html">⚔️ <span>OTTv2 CODE ARENA</span></a>
+        <nav class="hub-nav">
+            <a href="home.html" class="active">🏠 Trang của tôi</a>
+            <a href="arena.html#/tournaments">🏆 Giải đấu</a>
+            <a href="arena.html#/matches">📜 Lịch sử trận</a>
+            <a href="arena.html#/leaderboard">🏅 Xếp hạng</a>
+            <a href="guide.html">📘 Hướng dẫn</a>
+            <a href="arena.html#/admin" id="nav-admin" hidden>🛠 Quản trị</a>
+        </nav>
+        <div class="hub-tools">
+            <a class="btn btn-ghost" id="me-chip" href="#">👤 …</a>
+            <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện sáng/tối">🌙</button>
+            <button id="logout-btn" class="btn btn-ghost" title="Đăng xuất">⏏ Đăng xuất</button>
+        </div>
+    </header>
+
+    <main class="hub-main">
+        <section class="card welcome">
+            <div>
+                <h1>Xin chào, <span id="hello-name">…</span> 👋</h1>
+                <p class="muted small" id="hello-sub">Đang tải thành tích…</p>
+            </div>
+            <div class="stat-grid" id="stat-grid"></div>
+        </section>
+
+        <h2 class="section-title">🎮 Chọn trò chơi</h2>
+        <section class="game-picker" id="game-picker">
+            <article class="game-card" data-game="rps">
+                <div class="game-art rps-art" aria-hidden="true"><span>✊</span><span>✋</span><span>✌️</span></div>
+                <div class="game-body">
+                    <h3>Oẳn tù tì — Đấu trường quân cờ</h3>
+                    <p class="small muted">Bàn 9×9, mỗi bên 10 quân Đấm / Lá / Kéo, đi 1 ô theo 8 hướng. Quân khắc chế thì ăn được quân kia. Ai đưa được một quân tới ô đích phía đối diện trước thì thắng.</p>
+                    <div class="game-meta small" id="meta-rps"></div>
+                    <div class="row">
+                        <a class="btn btn-primary" href="index.html">▶ Vào chơi</a>
+                        <a class="btn" href="guide.html#rps">📘 Luật chơi</a>
+                    </div>
+                </div>
+            </article>
+            <article class="game-card" data-game="caro">
+                <div class="game-art caro-art" aria-hidden="true">
+                    <i class="s1"></i><i></i><i class="s2"></i><i></i><i class="s1"></i><i class="s2"></i><i></i><i class="s1"></i><i></i>
+                </div>
+                <div class="game-body">
+                    <h3>Cờ Caro (Gomoku)</h3>
+                    <p class="small muted">Hai bên lần lượt đặt quân lên ô trống. Ai có đủ 5 quân liên tiếp theo hàng, cột hoặc đường chéo trước thì thắng. Xanh đi trước. Có thể chơi tay, cho bot đấu bot, hoặc đấu online.</p>
+                    <div class="game-meta small" id="meta-caro"></div>
+                    <div class="row">
+                        <a class="btn btn-primary" href="caro.html">▶ Vào chơi</a>
+                        <a class="btn" href="guide.html#caro">📘 Luật chơi</a>
+                    </div>
+                </div>
+            </article>
+        </section>
+
+        <div class="grid-2">
+            <section class="card">
+                <h2>📊 Thành tích theo trò chơi</h2>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Trò chơi</th><th class="num">Trận</th><th class="num">Thắng</th><th class="num">Thua</th><th class="num">Hòa</th><th class="num">Tỉ lệ</th></tr></thead>
+                    <tbody id="by-game"></tbody>
+                </table></div>
+                <h3 style="margin-top:1rem">Theo loại trận</h3>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Loại</th><th class="num">Trận</th><th class="num">Thắng</th><th class="num">Thua</th><th class="num">Hòa</th></tr></thead>
+                    <tbody id="by-kind"></tbody>
+                </table></div>
+            </section>
+            <section class="card">
+                <h2>🏆 Giải đấu của tôi</h2>
+                <div id="my-tournaments" class="small muted">Đang tải…</div>
+            </section>
+        </div>
+
+        <section class="card">
+            <div class="row between"><h2>📜 Lịch sử trận đấu gần đây</h2><a class="small" href="arena.html#/matches">Xem tất cả →</a></div>
+            <div id="recent" class="table-wrap"><p class="muted">Đang tải…</p></div>
+        </section>
+    </main>
+    <div id="toast" class="toast" role="status"></div>
+    <script src="home.js"></script>
+</body>
+
+</html>

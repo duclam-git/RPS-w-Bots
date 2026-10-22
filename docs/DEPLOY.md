@@ -4,8 +4,8 @@
 
 ```bash
 npm install
-cp .env.example .env        # sửa ADMIN_KEY; server tự đọc .env (biến môi trường thật luôn thắng)
-npm start                   # http://<IP máy>:3000/arena.html — cho học sinh vào bằng IP đó
+cp .env.example .env        # sửa ADMIN_PASSWORD, ADMIN_KEY; server tự đọc .env (biến môi trường thật luôn thắng)
+npm start                   # http://<IP máy>:3000 — trang đăng nhập; cho học sinh vào bằng IP đó
 ```
 `sudo apt install bubblewrap` nếu là Linux (cách ly bot, xem `SECURITY.md`). Windows/macOS chạy được, chỉ có tầng bảo vệ cơ bản.
 
@@ -19,7 +19,8 @@ Internet ──HTTPS──> nginx/Caddy ──http://127.0.0.1:3000──> node 
 
 `.env` tối thiểu:
 ```
-ADMIN_KEY=<chuỗi ngẫu nhiên dài>
+ADMIN_PASSWORD=<mật khẩu admin dài>
+ADMIN_KEY=<chuỗi ngẫu nhiên dài, khác mật khẩu>   # bước 2 của đăng nhập admin
 TRUST_PROXY=1               # BẮT BUỘC sau proxy: để giới hạn tần suất thấy IP thật (xem §4)
 COOKIE_SECURE=1             # cookie Secure + HSTS
 SANDBOX_STRICT=1            # từ chối ngôn ngữ không được cách ly mạnh

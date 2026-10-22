@@ -9,7 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const cors = require('cors');
 
-const engine = require('./engine');
+const games = require('./games');
 const matchplay = require('./matchplay');
 const runner = require('./runner');
 const auth = require('./auth');
@@ -34,14 +34,37 @@ app.use('/api', auth.sameOriginOnly);     // CSRF guard for state-changing API c
 // (which contains submitted bot source code), server code and temp bot files - never serve those.
 const PUBLIC_FILES = new Set([
     'index.html', 'style.css', 'logic.js', 'bots.js', 'bot_templates.js', 'elo.js',
-    'arena.html', 'arena.css', 'arena.js'
+    'arena.html', 'arena.css', 'arena.js',
+    'login.html', 'login.js', 'home.html', 'home.js', 'portal.css', 'guide.html',
+    'caro.html', 'caro_page.js', 'caro_strategies.js', 'bot_client.js', 'bot_worker.js', 'engine.js', 'games/caro.js'
 ]);
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+// Pages of the player area: login first (login.html -> home.html -> pick a game -> game page).
+// This is only the navigation flow; the real checks are on the API and the socket events.
+const MEMBER_PAGES = new Set(['home.html', 'index.html', 'caro.html']);
+// Bot code typed by the player runs in this worker. Its own CSP allows eval (that is how the code runs)
+// but no network at all, so the code cannot call the API with the player's cookie.
+const WORKER_CSP = "default-src 'none'; script-src 'self' 'unsafe-eval'";
+
+app.get('/', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (!req.user) return res.redirect(302, '/login.html');
+    res.redirect(302, auth.isAdminReq(req) ? '/arena.html#/admin' : '/home.html');
+});
 app.use((req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
     const file = req.path.replace(/^\//, '');
-    if (PUBLIC_FILES.has(file)) return res.sendFile(path.join(__dirname, file));
-    next();
+    if (!PUBLIC_FILES.has(file)) return next();
+    if (MEMBER_PAGES.has(file) && !req.user) {
+        res.set('Cache-Control', 'no-store');
+        return res.redirect(302, `/login.html?next=${encodeURIComponent(req.originalUrl)}`);
+    }
+    if (file === 'login.html' && req.user) {
+        res.set('Cache-Control', 'no-store');
+        return res.redirect(302, auth.isAdminReq(req) ? '/arena.html#/admin' : '/home.html');
+    }
+    if (file.endsWith('.html')) res.set('Cache-Control', 'no-store');      // the redirects above depend on the session
+    if (file === 'bot_worker.js') res.set('Content-Security-Policy', WORKER_CSP);
+    res.sendFile(path.join(__dirname, file));
 });
 
 // Code editor (Ace) served from this server so the arena also works on a LAN without internet.
@@ -87,11 +110,12 @@ function evictLocalBots() {
 setInterval(evictLocalBots, 60 * 1000).unref();
 
 /** Compile once per distinct code (C++ used to be recompiled on EVERY move: seconds per move). */
-function acquireLocalBot(lang, code) {
-    const key = crypto.createHash('sha1').update(`${lang}\0${code}`).digest('hex').slice(0, 16);
+const localBotKey = (lang, code, game) => crypto.createHash('sha1').update(`${game.id}\0${lang}\0${code}`).digest('hex').slice(0, 16);
+function acquireLocalBot(lang, code, game) {
+    const key = localBotKey(lang, code, game);
     let e = localBotCache.get(key);
     if (!e) {
-        e = { promise: runner.prepareBot(`local_${key}`, lang, code), lastUsed: Date.now(), busy: 0 };
+        e = { promise: runner.prepareBot(`local_${key}`, lang, code, { game }), lastUsed: Date.now(), busy: 0 };
         localBotCache.set(key, e);
         e.promise.then(p => { if (!p.success) localBotCache.delete(key); });   // don't cache failures
         evictLocalBots();
@@ -101,19 +125,47 @@ function acquireLocalBot(lang, code) {
     return { entry: e, release: () => { e.busy--; e.lastUsed = Date.now(); } };
 }
 
+// Every call spawns a sandboxed process (and new code means a compile), so this is the cheapest way to load
+// the CPU: logged-in players only, with a per-account budget on top of the per-IP one.
 const localRunLimiter = api.rateLimit({ windowMs: 60_000, max: 900 });
+const LOCAL_RUN_PER_MIN = parseInt(process.env.LOCAL_RUN_PER_MIN, 10) || 600;      // a whole Caro game is ~120 calls
+const LOCAL_RUN_PARALLEL = parseInt(process.env.LOCAL_RUN_PARALLEL, 10) || 2;
+const LOCAL_NEW_CODE_PER_MIN = parseInt(process.env.LOCAL_NEW_CODE_PER_MIN, 10) || 20;  // compiles (first run of a code)
+const localRunUsage = new Map();            // userId -> { calls, newCodes, inFlight }
+setInterval(() => { for (const [id, u] of localRunUsage) { if (u.inFlight) { u.calls = 0; u.newCodes = 0; } else localRunUsage.delete(id); } }, 60_000).unref();
+
 app.post('/api/run-bot-move', localRunLimiter, async (req, res) => {
     if (process.env.ALLOW_LOCAL_RUN === '0') {
         return res.status(403).json({ success: false, error: 'Máy chủ này đã tắt chế độ chạy code Python/C++ cục bộ.' });
     }
+    const user = auth.userFromCookieHeader(req.headers.cookie);
+    if (!user) return res.status(401).json({ success: false, error: 'Bạn cần đăng nhập để chạy bot Python/C++ trên máy chủ.' });
     const { lang, code, state } = req.body || {};
+    const game = games.get(String((req.body || {}).game || games.DEFAULT_GAME));
+    if (!game) return res.status(400).json({ success: false, error: 'Trò chơi không tồn tại' });
     if (!lang || !code || !state) {
         return res.status(400).json({ error: 'Thiếu thông số lang, code hoặc state' });
     }
     if (!['python', 'cpp', 'javascript'].includes(lang) || typeof code !== 'string' || Buffer.byteLength(code) > MAX_LOCAL_CODE_BYTES) {
         return res.status(400).json({ success: false, error: 'Ngôn ngữ không hợp lệ hoặc code quá lớn (tối đa 100KB)' });
     }
-    const { entry, release } = acquireLocalBot(lang, code);
+    const usage = localRunUsage.get(user.id) || { calls: 0, newCodes: 0, inFlight: 0 };
+    localRunUsage.set(user.id, usage);
+    const limited = process.env.DISABLE_RATE_LIMIT !== '1';
+    if (limited && usage.inFlight >= LOCAL_RUN_PARALLEL) {
+        return res.status(429).json({ success: false, error: `Chỉ chạy được ${LOCAL_RUN_PARALLEL} nước đi cùng lúc cho mỗi tài khoản.` });
+    }
+    if (limited && usage.calls >= LOCAL_RUN_PER_MIN) {
+        return res.status(429).json({ success: false, error: 'Bạn đã chạy quá nhiều nước đi trong 1 phút, hãy thử lại sau ít giây.' });
+    }
+    const isNew = !localBotCache.has(localBotKey(lang, code, game));
+    if (limited && isNew && usage.newCodes >= LOCAL_NEW_CODE_PER_MIN) {
+        return res.status(429).json({ success: false, error: 'Bạn đã nộp quá nhiều phiên bản code mới trong 1 phút, hãy thử lại sau.' });
+    }
+    usage.calls++;
+    if (isNew) usage.newCodes++;
+    usage.inFlight++;
+    const { entry, release } = acquireLocalBot(lang, code, game);
     try {
         const prep = await entry.promise;
         if (!prep.success) return res.json({ success: false, error: prep.error });
@@ -123,6 +175,7 @@ app.post('/api/run-bot-move', localRunLimiter, async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     } finally {
         release();
+        usage.inFlight--;
     }
 });
 
@@ -136,11 +189,32 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
-// Game rules live in engine.js (shared by online rooms, tournaments and replay validation).
-const rules = engine.resolveRules();
+// Online rooms play any registered game (games/index.js) with that game's default rules; Caro rooms may pick
+// a board size / win length (validated by the game itself).
+// Players must be logged in to open or join a room, unless ALLOW_GUEST_ROOMS=1 (old behaviour, tests).
+const guestRoomsAllowed = () => process.env.ALLOW_GUEST_ROOMS === '1';
+function roomRules(game, raw) {
+    if (game.id !== 'caro' || !raw || typeof raw !== 'object') return game.resolveRules();
+    const v = game.validateRules({ size: raw.size, winLength: raw.winLength });
+    return game.resolveRules(v.ok ? v.rules : {});
+}
 
 // ===== Online rooms =====
 const rooms = new Map();
+
+// Admin overview combines persisted totals with live game state held in memory.
+app.get('/api/admin/overview', auth.requireAdmin, (req, res) => {
+    const users = db.prepare('SELECT COUNT(*) AS total FROM users').get().total;
+    const tournaments = db.prepare(`
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN status IN ('registration', 'running') THEN 1 ELSE 0 END) AS open
+        FROM tournaments
+    `).get();
+    const submissions = db.prepare('SELECT COUNT(*) AS total FROM entries WHERE user_id IS NOT NULL').get().total;
+    const onlineMatches = [...rooms.values()].filter(room => room.gameActive).length;
+    res.json({ users, tournaments: { open: tournaments.open || 0, total: tournaments.total }, submissions,
+        matches: onlineMatches + tournament.liveGameCount() });
+});
 const MAX_ROOMS = parseInt(process.env.MAX_ROOMS, 10) || 200;
 const MAX_ROOM_CODE_BYTES = 100 * 1024;
 const LANGS = ['javascript', 'python', 'cpp'];
@@ -156,7 +230,21 @@ function generateRoomCode() {
 // Who is on the other end of this socket? (same HttpOnly session cookie as the REST API)
 io.use((socket, next) => {
     socket.data.user = auth.userFromCookieHeader(socket.request.headers.cookie);
+    socket.data.sessionHash = socket.data.user ? auth.sessionHashFromCookieHeader(socket.request.headers.cookie) : null;
     next();
+});
+
+// A socket authenticates once (handshake). When its session dies - logout, password change/reset, role
+// change - the socket must not keep acting as that account: tell the page and close the connection.
+auth.events.on('revoke', ({ tokenHash, userId, exceptTokenHash }) => {
+    for (const socket of io.sockets.sockets.values()) {
+        const d = socket.data;
+        if (!d.user) continue;
+        const hit = tokenHash ? d.sessionHash === tokenHash : (d.user.id === userId && d.sessionHash !== exceptTokenHash);
+        if (!hit) continue;
+        socket.emit('session_revoked', { message: 'Phiên đăng nhập đã kết thúc. Hãy đăng nhập lại.' });
+        socket.disconnect(true);
+    }
 });
 
 /** Display name inside a room: the account name for logged-in users; guests can't pose as accounts/bots. */
@@ -232,8 +320,17 @@ io.on('connection', (socket) => {
         if (Number.isInteger(id)) socket.leave(`t:${id}`);
     }, { raw: true });
 
+    const mustLogIn = () => {
+        if (socket.data.user || guestRoomsAllowed()) return false;
+        socket.emit('join_error', 'Bạn cần đăng nhập để chơi online.');
+        return true;
+    };
+
     // 1. Create Room
-    on('create_room', ({ playerName, lang }) => {
+    on('create_room', ({ playerName, lang, game: gameId, rules: rawRules }) => {
+        if (mustLogIn()) return;
+        const game = games.get(String(gameId || games.DEFAULT_GAME));
+        if (!game) return socket.emit('join_error', 'Trò chơi không tồn tại.');
         if (socket.roomCode) handleUserLeave(socket);                 // one room at a time
         if (rooms.size >= MAX_ROOMS) return socket.emit('join_error', 'Máy chủ đang có quá nhiều phòng, hãy thử lại sau ít phút.');
         let roomCode;
@@ -241,6 +338,8 @@ io.on('connection', (socket) => {
 
         const room = {
             code: roomCode,
+            game: game.id,
+            rules: roomRules(game, rawRules),
             hostId: socket.id,
             phase: 'lobby',                 // lobby -> preparing -> countdown -> playing -> lobby
             blue: newSeat(socket, playerName, 'Người chơi 1', lang, 'javascript'),
@@ -259,10 +358,15 @@ io.on('connection', (socket) => {
     });
 
     // 2. Join Room
-    on('join_room', ({ roomCode, playerName, lang }) => {
+    on('join_room', ({ roomCode, playerName, lang, game: expectedGame }) => {
+        if (mustLogIn()) return;
         const cleanCode = guard.str(roomCode, 12).toUpperCase();
         const room = rooms.get(cleanCode);
         if (!room) return socket.emit('join_error', 'Mã phòng không tồn tại hoặc phòng đã đóng.');
+        // a Caro page must not sit in an RPS room (and vice versa): its board and bot code would not fit
+        if (expectedGame && String(expectedGame) !== room.game) {
+            return socket.emit('join_error', `Phòng ${cleanCode} chơi ${games.get(room.game).name}. Hãy vào trò chơi đó từ trang chọn trò chơi.`);
+        }
         if (room.gameActive) return socket.emit('join_error', 'Trận đấu trong phòng này đang diễn ra!');
         if (socket.roomCode === cleanCode) return;                    // already inside
         if (socket.roomCode) handleUserLeave(socket);
@@ -307,9 +411,14 @@ io.on('connection', (socket) => {
     });
 
     // 4. Request Rematch (Reset submission state for new round)
+    // Only a seated player, and only between matches: a spectator (or anybody) used to be able to cancel a
+    // running match with this event.
     on('request_rematch', () => {
         const room = rooms.get(socket.roomCode);
         if (!room) return;
+        const seated = (room.blue && room.blue.socketId === socket.id) || (room.red && room.red.socketId === socket.id);
+        if (!seated) return socket.emit('join_error', 'Chỉ người chơi trong phòng mới yêu cầu đấu lại được.');
+        if (room.phase !== 'lobby') return socket.emit('join_error', 'Trận đấu đang diễn ra, hãy chờ trận kết thúc.');
         resetRoom(room);
         io.to(room.code).emit('room_updated', getRoomPublicState(room));
         io.to(room.code).emit('rematch_ready', 'Ván đấu mới sẵn sàng! Hãy chỉnh sửa code và bấm "Nộp Code" để thi đấu lại.');
@@ -341,7 +450,7 @@ async function prepareAndStart(room) {
         for (const side of ['blue', 'red']) {
             const seat = room[side];
             if (!seat) return abandonPreparation(room);
-            const prep = await runner.prepareBot(`${code}_${side}`, seat.lang, seat.code);
+            const prep = await runner.prepareBot(`${code}_${side}`, seat.lang, seat.code, { game: games.get(room.game) });
             // somebody may have left (or the room died) while we were compiling
             if (rooms.get(code) !== room || !room.blue || !room.red || room.phase !== 'preparing') {
                 if (prep.success) runner.cleanupBot(prep.botHandler);
@@ -392,6 +501,16 @@ function handleUserLeave(socket) {
     const seat = room.blue && room.blue.socketId === socket.id ? room.blue
         : room.red && room.red.socketId === socket.id ? room.red : null;
     const wasSeated = !!seat;
+
+    // A running match is bot vs bot on the server: it does not need either player connected. Leaving (or a
+    // dropped connection) must neither cancel it nor dodge the result, so it plays on and is saved/rated as
+    // usual. startOnlineMatch holds its own references to both bots and cleans them up when it ends.
+    if (seat && room.gameActive) {
+        if (seat === room.blue) room.blue = null; else room.red = null;
+        io.to(roomCode).emit('player_left_match', { name: seat.name, message: `${seat.name} đã rời phòng. Trận đấu vẫn tiếp tục và kết quả vẫn được ghi nhận.` });
+        io.to(roomCode).emit('room_updated', getRoomPublicState(room));
+        return;
+    }
     if (seat) {
         // clean the leaver's compiled bot BEFORE the seat is emptied (resetRoom can no longer see it afterwards)
         if (seat.handler) { runner.cleanupBot(seat.handler); seat.handler = null; }
@@ -401,6 +520,7 @@ function handleUserLeave(socket) {
     }
 
     if (!room.blue && !room.red) {
+        if (room.gameActive) return;                                  // the match plays on; it deletes the room when done
         resetRoom(room);
         rooms.delete(roomCode);
         return;
@@ -413,13 +533,16 @@ function handleUserLeave(socket) {
     io.to(roomCode).emit('room_updated', getRoomPublicState(room));
 }
 
+// The Elo ladder is the RPS ladder; other games are recorded in the history but never rated.
 function isRated(room) {
-    return !!(room.blue && room.red && room.blue.userId && room.red.userId && room.blue.userId !== room.red.userId);
+    return !!(room.game === 'rps' && room.blue && room.red && room.blue.userId && room.red.userId && room.blue.userId !== room.red.userId);
 }
 
 function getRoomPublicState(room) {
     return {
         roomCode: room.code,
+        game: room.game,
+        rules: room.game === 'caro' ? { size: room.rules.rows, winLength: room.rules.winLength } : null,
         gameActive: room.gameActive,
         blue: room.blue ? { name: room.blue.name, lang: room.blue.lang, ready: room.blue.ready, account: !!room.blue.userId } : null,
         red: room.red ? { name: room.red.name, lang: room.red.lang, ready: room.red.ready, account: !!room.red.userId } : null,
@@ -443,17 +566,19 @@ async function startOnlineMatch(room) {
     const blueInfo = { name: blue.name, lang: blue.lang, userId: blue.userId };
     const redInfo = { name: red.name, lang: red.lang, userId: red.userId };
     const rated = isRated(room);
+    const rules = room.rules;
 
     const result = await matchplay.playMatch({
         blue: { ...blueInfo, handler: blue.handler },
         red: { ...redInfo, handler: red.handler },
+        game: games.get(room.game),
         rules,
         delayMs: 450,
         signal,
         onStart: (board) => {
             room.board = board;
             io.to(room.code).emit('match_started', {
-                board, rated,
+                board, rated, game: room.game,
                 blue: { name: blueInfo.name, lang: blueInfo.lang },
                 red: { name: redInfo.name, lang: redInfo.lang }
             });
@@ -487,8 +612,13 @@ async function startOnlineMatch(room) {
     if (blue.handler) { runner.cleanupBot(blue.handler); blue.handler = null; }
     if (red.handler) { runner.cleanupBot(red.handler); red.handler = null; }
 
-    if (result.aborted) { if (room.phase === 'playing') room.phase = 'lobby'; return; }   // a player left / rematch requested
-    finishOnlineMatch(room, result, blueInfo, redInfo, rated);
+    if (!result.aborted) finishOnlineMatch(room, result, blueInfo, redInfo, rated);
+    else if (room.phase === 'playing') { room.phase = 'lobby'; room.gameActive = false; }
+    // everybody left while the match was playing on: the room was kept alive only for it
+    if (!room.blue && !room.red && rooms.get(room.code) === room) {
+        resetRoom(room);
+        rooms.delete(room.code);
+    }
 }
 
 function finishOnlineMatch(room, result, blueInfo, redInfo, rated) {
@@ -503,12 +633,13 @@ function finishOnlineMatch(room, result, blueInfo, redInfo, rated) {
     let matchId = null;
     try {
         matchId = saveMatch({
+            game: room.game,
             kind: 'online',
             blue: blueInfo,
             red: redInfo,
             winner: result.winner,
             reason: result.reason,
-            rules,
+            rules: room.rules,
             durationMs: result.durationMs
         }, result.moves);
     } catch (err) {
@@ -547,6 +678,15 @@ app.use((err, req, res, next) => {
 
 tournament.setIO(io);
 runner.cleanupTempDir();
+auth.ensureAdminAccount().then(a => {
+    if (a.created) {
+        console.log(`👤 Đã tạo tài khoản admin "${a.username}"${a.password ? ` — mật khẩu (tự sinh, chỉ hiện lần này): ${a.password}` : ' (mật khẩu = ADMIN_PASSWORD)'}`);
+    } else if (a.reset) {
+        console.log(`👤 Đã đặt lại mật khẩu tài khoản admin "${a.username}" theo ADMIN_PASSWORD. Hãy bỏ ADMIN_PASSWORD_RESET=1.`);
+    } else if (a.conflict) {
+        console.warn(`⚠ Tên "${a.username}" đã thuộc một tài khoản thường nên KHÔNG được nâng quyền. Đặt ADMIN_USERNAME khác để tạo tài khoản admin.`);
+    }
+}).catch(err => { console.error('[admin account]', err.message); process.exit(1); });
 runner.detectToolchains().then(t => {
     const line = (name, x) => `${x.ok ? '✅' : '❌'} ${name}${x.ok ? ` (${x.version})` : ` — ${x.hint}`}`;
     console.log(line('JavaScript', t.javascript));
@@ -593,8 +733,9 @@ process.on('uncaughtException', (err) => { console.error('[uncaughtException]', 
 server.listen(PORT, () => {
     console.log(`⚔️ OTTv2 Code Arena Server running at http://localhost:${PORT}`);
     console.log(`🏆 Giải đấu & lịch sử trận:  http://localhost:${PORT}/arena.html`);
+    console.log(`🔐 Đăng nhập (người chơi & admin):  http://localhost:${PORT}/login.html`);
     if (auth.ADMIN_KEY_IS_GENERATED) {
         console.log(`🔑 ADMIN_KEY (tự sinh, đổi mỗi lần chạy): ${auth.ADMIN_KEY}`);
-        console.log('   Đặt biến môi trường ADMIN_KEY để dùng khóa cố định. Đăng nhập rồi dùng khóa này một lần để nhận quyền admin.');
+        console.log('   Đặt biến môi trường ADMIN_KEY để dùng khóa cố định. Khóa được hỏi ngay sau mật khẩu của tài khoản admin.');
     }
 });

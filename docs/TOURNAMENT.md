@@ -24,11 +24,11 @@ Nguyên tắc: **server giữ bàn cờ (authoritative)**. Bot chỉ nhận snap
 
 ```bash
 npm install
-ADMIN_KEY=matkhau_cua_ban npm start      # Windows PowerShell:  $env:ADMIN_KEY="..."; npm start
-# mở  http://localhost:3000/arena.html
+ADMIN_PASSWORD=matkhau_admin ADMIN_KEY=khoa_admin npm start   # PowerShell: $env:ADMIN_KEY="..."; npm start
+# mở  http://localhost:3000  (trang đăng nhập)
 npm test                                  # 76 test: unit, end-to-end, bot tấn công, nginx thật
 ```
-Không đặt `ADMIN_KEY` → server tự sinh khóa và in ra console (đổi mỗi lần chạy). Đăng nhập rồi bấm 🔑 nhập khóa một lần để tài khoản thành admin (xem `docs/ACCOUNTS.md`).
+Không đặt `ADMIN_KEY` → server tự sinh khóa và in ra console (đổi mỗi lần chạy). Admin đăng nhập ở `login.html` bằng tài khoản admin + mật khẩu, rồi nhập khóa này (xem `docs/ACCOUNTS.md` mục 1b).
 Biến môi trường khác: `PORT`, `DB_PATH` (mặc định `data/ott.db`), `PYTHON_CMD`.
 
 ## 3. Lịch sử & xem lại trận (#3)
@@ -49,9 +49,10 @@ Biến môi trường khác: `PORT`, `DB_PATH` (mặc định `data/ott.db`), `P
 - **Cặp đấu (series)** = best-of-N ván, **đổi bên Xanh/Đỏ mỗi ván** (Xanh đi trước nên có lợi thế; với bot giống nhau Xanh luôn thắng). Chốt sớm khi một bên đủ số ván thắng.
 - Knockout hòa sau N ván → đấu thêm tối đa 4 ván "cái chết đột ngột"; vẫn hòa → bên có seed tốt hơn đi tiếp.
 - Vòng bảng: thắng cặp 3đ, hòa 1đ; xếp theo điểm → hiệu số ván → số ván thắng → **đối đầu trực tiếp** → seed. Thể thức vòng tròn mà bảng vẫn đồng hạng hoàn toàn ở ngôi đầu thì **tự đá playoff** giữa các đội đó (loại trực tiếp, số ván như knockout) thay vì để seed quyết định.
+- **Hiển thị nhánh đấu:** các cặp được nối bằng đường (SVG vẽ theo vị trí thật của thẻ, tự vẽ lại khi đổi cỡ màn hình). Cặp đã xong: đường **xanh lá đậm** xuất phát từ đúng dòng người thắng tới vòng sau, người thắng có nền xanh + ▶, người thua mờ và gạch ngang; cặp đang đấu: đường **xanh dương nét đứt chạy**; chưa đấu: nét đứt xám. Cột cuối "Vô địch" hiện nhà vô địch (viền vàng). Có chú giải màu ở góc thẻ, chạy được ở giao diện tối.
 - Sau vòng bảng, khi xếp nhánh knockout những đội cùng bảng được **tách ra khỏi nhau ở vòng đầu** (trường hợp 4 bảng đi tiếp 2 trước đây ra toàn các cặp cùng bảng).
 - Đăng ký bằng **tài khoản** (mặc định; `requireLogin:false` cho giải mở): tên thi đấu = tên tài khoản, 1 bot/tài khoản, tự sửa/rút bot đến khi admin chốt. Server **biên dịch + chạy thử bot** trên thế cờ khởi đầu và từ chối kèm lý do nếu lỗi (trước đây lỗi chỉ lộ ra khi bot âm thầm đi ngẫu nhiên suốt giải). Giải mở (không cần đăng nhập) dùng `editToken` lưu trong trình duyệt.
-- Admin (header `X-Admin-Key`, giao diện nút 🔑): tạo giải, chốt & bắt đầu (seed theo **Elo** / thứ tự đăng ký / ngẫu nhiên / thủ công qua API), **chạy toàn bộ**, **chạy 1 cặp**, **tạm dừng**, xóa bot, xóa giải.
+- Admin (phiên admin đã qua bước khóa; header `X-Admin-Key` chỉ khi bật `ADMIN_KEY_HEADER=1`): tạo giải, chốt & bắt đầu (seed theo **Elo** / thứ tự đăng ký / ngẫu nhiên / thủ công qua API), **chạy toàn bộ**, **chạy 1 cặp**, **tạm dừng**, xóa bot, xóa giải.
 - Chế độ trình diễn: `moveDelayMs` 300–500 để khán giả xem từng nước; ván đang chạy phát qua Socket.io cho mọi người xem (người vào muộn nhận snapshot).
 - Bền vững: ván chỉ ghi DB khi kết thúc; tạm dừng hoặc server sập → cặp đang dở quay về `ready`, các ván đã xong giữ nguyên; khởi động lại tự chạy tiếp giải đang `auto_run`.
 

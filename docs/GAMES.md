@@ -25,7 +25,21 @@ Bot viết cho trò khác bị từ chối ngay lúc đăng ký, kèm lý do (b�
 
 Quản trị → Tạo giải: chọn **Trò chơi**, form luật đổi theo (RPS: cỡ bàn, bảng khắc chế, trình soạn thế cờ; Caro: cỡ bàn, số quân thắng, bàn xem trước). Đổi trò chơi chỉ được khi chưa có bot đăng ký và chưa bắt đầu. Lịch sử có bộ lọc theo trò chơi; replay và xem trực tiếp tự vẽ đúng loại quân (quân Caro, không có ô đích).
 
-**Giới hạn:** phòng đấu *Online* và chế độ luyện tập ở trang chính (`index.html`) vẫn chỉ có RPS — trang đó gắn chặt với bàn 9×9. Giải đấu, lịch sử, replay và bảng quản trị thì đủ cả hai trò. Elo (bảng xếp hạng) vẫn chỉ tính từ các trận Online RPS.
+## Cờ Caro ở khu người chơi (`caro.html`)
+
+Trước đây Caro chỉ có trong giải đấu. Nay người chơi chọn Caro ở trang người chơi và có trang riêng:
+
+| Chức năng | Chi tiết |
+|---|---|
+| Chơi tay | Chọn "👤 Người chơi" cho một bên, bấm vào ô. Bàn 3×3 (3 quân), 9×9, 13×13, 15×15, 19×19. |
+| Bot có sẵn | 6 chiến thuật (`caro_strategies.js`): 🎲 Ngẫu nhiên, 🎯 Giữ trung tâm, ⚔️ Tấn công, 🛡 Phòng thủ, ⚖️ Cân bằng, 🧠 Minimax α-β. Mỗi cái là một file code hoàn chỉnh có chú thích. |
+| Code mẫu | JS: cả 6; Python: ngẫu nhiên, tấn công, phòng thủ, cân bằng; C++: ngẫu nhiên, cân bằng. "⤵ Nạp mẫu" trong tab Code. |
+| Code của tôi | JavaScript chạy trong Web Worker của trình duyệt; Python/C++ chạy trên server qua `POST /api/run-bot-move` (có tham số `game`). |
+| Bot đấu bot | Xem từng nước (hai bên đều là bot), hoặc "📊 Bot đấu bot" chạy 10–100 ván trong worker, **đổi màu mỗi ván**, báo tỉ lệ thắng. |
+| Online | Phòng có `game` (`create_room { game:'caro', rules:{size, winLength} }`). Trang Caro vào phòng RPS (hoặc ngược lại) bị từ chối kèm lý do. Trận Caro online được lưu (`matches.game = 'caro'`) nhưng **không tính Elo** (Elo là bảng xếp hạng Oẳn tù tì). |
+| Lịch sử | Ván luyện tập được gửi lên `POST /api/matches/local { game:'caro', rules }`; server chạy lại từng nước bằng engine Caro rồi mới lưu. |
+
+Độ mạnh các chiến thuật được kiểm bằng test (`test/caro.test.js`): mọi bot thắng bot ngẫu nhiên ≥ 5/6 ván, minimax thắng nhiều hơn thua trước ba bot heuristic trên bàn 15×15.
 
 ## Luật RPS mở rộng
 

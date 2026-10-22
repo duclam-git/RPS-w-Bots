@@ -122,15 +122,38 @@ tr.advance td:first-child { box-shadow: inset 4px 0 0 var(--green); }
 .t-item h3 { margin-bottom: .3rem; }
 
 /* ---------- bracket ---------- */
-.bracket { display: flex; gap: 2.2rem; overflow-x: auto; padding: .5rem .2rem 1rem; align-items: stretch; }
-.b-round { display: flex; flex-direction: column; justify-content: space-around; gap: .9rem; min-width: 210px; }
-.b-title { text-align: center; font-weight: 800; font-size: .8rem; text-transform: uppercase; color: var(--ink-2); }
-.sc { background: var(--surface); border: 2px solid var(--border); border-radius: 10px; overflow: hidden; font-size: .88rem; }
+.bracket { position: relative; display: flex; gap: 3rem; overflow-x: auto; padding: .5rem .2rem 1rem; align-items: stretch; }
+.b-round { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: space-around; gap: .9rem; min-width: 210px; }
+.b-title { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; font-weight: 800; color: var(--ink-2); text-align: center; }
+.b-lines { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; overflow: visible; }
+.b-lines path { fill: none; stroke-width: 2px; stroke-linejoin: round; }
+.b-lines path.wait { stroke: var(--line); stroke-dasharray: 5 5; }
+.b-lines path.run { stroke: var(--blue); stroke-width: 2.5px; stroke-dasharray: 7 5; animation: b-flow 1s linear infinite; }
+.b-lines path.win { stroke: var(--green); stroke-width: 3.5px; }
+.b-lines circle.win { fill: var(--green); }
+@keyframes b-flow { to { stroke-dashoffset: -12; } }
+.b-champ-col { min-width: 170px; }
+.b-champ { border: 2px dashed var(--line); border-radius: 12px; padding: .7rem .8rem; text-align: center; font-weight: 800; background: var(--surface); }
+.b-champ.won { border: 3px solid var(--gold); background: var(--gold-bg); color: var(--gold); box-shadow: 0 0 0 4px #d9770622; font-size: 1.05rem; }
+.b-legend { display: flex; gap: .9rem; flex-wrap: wrap; color: var(--ink-2); }
+.b-legend span { display: inline-flex; align-items: center; gap: .35rem; }
+.lg { display: inline-block; width: 22px; height: 0; border-top: 3px solid; }
+.lg.win { border-color: var(--green); }
+.lg.run { border-color: var(--blue); border-top-style: dashed; }
+.lg.wait { border-color: var(--line); border-top-style: dashed; }
+.lg.out { width: 12px; height: 12px; border: 2px solid var(--line); background: var(--surface-2); border-radius: 3px; opacity: .6; }
+.sc { position: relative; background: var(--surface); border: 2px solid var(--border); border-radius: 10px; overflow: hidden; font-size: .88rem; }
 .sc.running { border-color: var(--blue); box-shadow: 0 0 0 3px #2563eb33; }
+.sc.done { border-color: var(--green); }
 .sc.bye { opacity: .6; border-style: dashed; }
 .sc-row { display: flex; align-items: center; gap: .5rem; padding: .35rem .6rem; }
 .sc-row + .sc-row { border-top: 1px solid var(--line); }
-.sc-row.win { background: var(--gold-bg); font-weight: 800; }
+.sc-row.win { background: #dcfce7; color: #14532d; font-weight: 800; box-shadow: inset 4px 0 0 var(--green); }
+.sc-row.lose { opacity: .55; }
+.sc-row.lose .nm { text-decoration: line-through; text-decoration-thickness: 1px; }
+.sc-row .adv { color: var(--green); font-size: .7rem; }
+[data-theme="dark"] .sc-row.win { background: #14532d; color: #dcfce7; }
+[data-theme="dark"] .sc-row .adv { color: #4ade80; }
 .sc-row .seed { font-size: .7rem; color: var(--ink-2); min-width: 1.2rem; }
 .sc-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sc-row .sc-score { font-family: 'Fira Code', monospace; font-weight: 700; }
@@ -199,6 +222,7 @@ tr.advance td:first-child { box-shadow: inset 4px 0 0 var(--green); }
     background: var(--ink); color: var(--surface); padding: .6rem 1.1rem; border-radius: 10px;
     font-weight: 600; transition: transform .25s; z-index: 50; max-width: 90vw;
 }
+.toast:not(.show) { opacity: 0; pointer-events: none; }
 .toast.show { transform: translateX(-50%) translateY(0); }
 .toast.err { background: var(--red); color: #fff; }
 .champion { text-align: center; font-size: 1.3rem; font-weight: 800; padding: .8rem; background: var(--gold-bg); border: 2px solid var(--gold); border-radius: 12px; margin-bottom: 1.1rem; }
@@ -215,6 +239,24 @@ tr.me td { background: var(--gold-bg); font-weight: 700; }
 /* ---------- admin ---------- */
 .tabs { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .tabs .btn.active { background: var(--ink); color: var(--surface); }
+.admin-overview-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .9rem; margin: 0; }
+.admin-overview-grid .overview-card {
+    min-height: 174px; padding: 1.15rem 1.25rem; text-align: left; border-width: 3px;
+    border-radius: 16px; background: var(--surface); box-shadow: 6px 6px 0 var(--border);
+    display: flex; flex-direction: column; align-items: stretch; justify-content: space-between;
+}
+.overview-card-heading { display: flex; align-items: center; justify-content: space-between; gap: .6rem; color: var(--ink-2); font-size: .9rem; font-weight: 700; }
+.overview-icon { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border-radius: 12px; font-size: 1.25rem; }
+.admin-overview-grid .overview-card .overview-icon { font-size: 1.25rem; letter-spacing: normal; text-transform: none; }
+.overview-users .overview-icon { color: var(--blue); background: var(--blue-bg); }
+.overview-tournaments .overview-icon { color: var(--green); background: #dcfce7; }
+[data-theme="dark"] .overview-tournaments .overview-icon { color: #4ade80; background: #14532d; }
+.overview-submissions .overview-icon { color: var(--gold); background: var(--gold-bg); }
+.overview-matches .overview-icon { color: var(--red); background: var(--red-bg); }
+.admin-overview-grid .overview-card b { display: block; margin-top: .5rem; font-size: 2rem; line-height: 1.1; font-family: 'Space Grotesk', sans-serif; }
+.admin-overview-grid .overview-card small { display: block; margin-top: .45rem; color: var(--ink-2); font-size: .83rem; }
+@media (max-width: 900px) { .admin-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .admin-overview-grid { grid-template-columns: 1fr; } }
 .seg { display: inline-flex; border: 2px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg button { font: inherit; font-weight: 700; font-size: .85rem; padding: .35rem .7rem; border: 0; border-right: 2px solid var(--border); background: var(--surface); color: var(--ink); cursor: pointer; }
 .seg button:last-child { border-right: 0; }

@@ -4,14 +4,29 @@
 
 | Việc | Cách làm |
 |---|---|
-| Đăng ký / đăng nhập | Nút 🔐 trên `arena.html` (hoặc link "Đăng nhập" ở trang chính). Tên 3–20 ký tự `A-Za-z0-9_.-`, mật khẩu 8–128 ký tự. |
+| Đăng ký / đăng nhập | **Trang riêng `login.html`** (mở `/` khi chưa đăng nhập là tự vào đây). Tên 3–20 ký tự `A-Za-z0-9_.-`, mật khẩu 8–128 ký tự. Xong thì vào **trang người chơi `home.html`** (thành tích, lịch sử, chọn trò chơi) → chọn trò → trang trò chơi (`index.html` Oẳn tù tì, `caro.html` Cờ Caro). Các trang khu người chơi tự chuyển về trang đăng nhập nếu chưa có phiên. |
 | Lưu mật khẩu | `scrypt` (có sẵn trong Node, không cần thư viện native), salt ngẫu nhiên mỗi người. |
-| Phiên đăng nhập | Token ngẫu nhiên 256-bit trong cookie `HttpOnly; SameSite=Lax` (thêm `Secure` khi chạy HTTPS hoặc `COOKIE_SECURE=1`). DB chỉ lưu SHA-256 của token nên lộ DB cũng không dùng lại được. Hết hạn sau 30 ngày. |
-| Socket.io | Handshake mang cùng cookie → server biết ai đang ngồi ghế Xanh/Đỏ. Người dùng không thể tự đặt tên khác tên tài khoản của mình. |
+| Phiên đăng nhập | Token ngẫu nhiên 256-bit trong cookie `HttpOnly; SameSite=Lax` (thêm `Secure` khi chạy HTTPS hoặc `COOKIE_SECURE=1`). DB chỉ lưu SHA-256 của token nên lộ DB cũng không dùng lại được. Hết hạn sau 30 ngày (phiên admin: 8 giờ). |
+| Socket.io | Handshake mang cùng cookie → server biết ai đang ngồi ghế Xanh/Đỏ. Người dùng không thể tự đặt tên khác tên tài khoản của mình. **Tạo/vào phòng online cần đăng nhập** (`ALLOW_GUEST_ROOMS=1` để cho khách như bản cũ). Khi phiên chết (đăng xuất, đổi/đặt lại mật khẩu, đổi quyền) server báo `session_revoked` và **đóng luôn các socket của phiên đó** — trước đây socket vẫn chạy dưới tên tài khoản cho tới khi tải lại trang. |
 | Chống đoán mật khẩu | Giới hạn theo IP + khóa tăng dần theo tên đăng nhập (5 lần sai → khóa 30 giây, nhân đôi mỗi lần sai tiếp). Có hash giả khi tên không tồn tại để không lộ tên nào có thật qua thời gian phản hồi. |
 | CSRF | Request ghi (POST/PUT/DELETE) có header `Origin` khác host bị từ chối + cookie `SameSite=Lax`. |
 | Đổi mật khẩu | Trang hồ sơ của mình; mọi thiết bị khác bị đăng xuất. |
-| Admin | Đăng nhập → bấm 🔑 → nhập `ADMIN_KEY` **một lần** → tài khoản thành admin vĩnh viễn (cột `role`). Header `X-Admin-Key` vẫn dùng được cho script. |
+| Admin | Xem mục 1b. |
+
+## 1b. Đăng nhập admin (gộp với đăng nhập người chơi)
+
+Một trang đăng nhập cho tất cả. Tài khoản admin đăng nhập **hai bước**:
+
+1. Tên + mật khẩu như người chơi. Nếu tài khoản có quyền admin, server **chưa** tạo phiên mà chỉ trả `{ needAdminKey: true }` kèm một cookie thử thách `ott_admin_challenge` (ngẫu nhiên 256-bit, `HttpOnly; SameSite=Strict; Path=/api/auth`, sống 2 phút, dùng một lần, chỉ lưu SHA-256 trong bộ nhớ).
+2. Trang hỏi **khóa admin** (`ADMIN_KEY`) → `POST /api/auth/admin-verify`. Đúng → phiên admin (`sessions.admin_verified = 1`, hết hạn sau `ADMIN_SESSION_TTL_HOURS`, mặc định 8 giờ) và chuyển thẳng tới `arena.html#/admin`. Sai 3 lần → thử thách bị hủy, phải nhập lại mật khẩu; mỗi lần sai cũng tính vào khóa chống dò theo tên đăng nhập.
+
+Quyền admin = **tài khoản role admin VÀ phiên đã qua bước khóa**. Hệ quả:
+- Biết `ADMIN_KEY` mà không có mật khẩu admin thì không làm gì được (đường cũ `claim-admin` "ai có khóa cũng thành admin" đã bỏ, trả 410). Lộ mật khẩu admin mà không có khóa cũng vậy.
+- Admin nâng/hạ quyền ai đó → mọi phiên của người đó bị thu hồi; người mới lên admin phải đăng nhập lại và qua bước khóa.
+- Migration v4 đăng xuất mọi phiên admin cũ (chúng chưa qua bước khóa).
+- Header `X-Admin-Key` (chỉ cần khóa) **tắt mặc định**; bật bằng `ADMIN_KEY_HEADER=1` khi cần cho script/CI.
+
+Tài khoản admin được **tạo sẵn lúc khởi động** nếu chưa có: tên `ADMIN_USERNAME` (mặc định `admin`), mật khẩu `ADMIN_PASSWORD` (để trống → sinh ngẫu nhiên và in ra console một lần). Tên này bị chặn khi đăng ký. Nếu tên đã thuộc một tài khoản thường, server **không** nâng quyền nó mà cảnh báo trên console. Quên mật khẩu admin: đặt `ADMIN_PASSWORD=...` + `ADMIN_PASSWORD_RESET=1`, khởi động lại một lần rồi bỏ biến đó.
 
 Tên trùng bot hệ thống (Grandmaster AI, Tactical AI…) bị chặn khi đăng ký; khách (chưa đăng nhập) dùng tên đó sẽ bị đổi thành `… (khách)`.
 
@@ -23,8 +38,8 @@ Tên trùng bot hệ thống (Grandmaster AI, Tactical AI…) bị chặn khi đ
 - Trận luyện tập trong trình duyệt gắn với tài khoản cho phía do bạn điều khiển (bot code / thủ công).
 - Bảng xếp hạng cũ trong `leaderboard.json` chỉ còn dùng cho các AI tham chiếu 🤖 (chỉ đọc). Điểm của người chơi cũ theo tên **không** được chuyển sang (vì không xác minh được chủ sở hữu).
 
-API: `POST /api/auth/register|login|logout|password|claim-admin|lang`, `GET /api/auth/me`, `GET /api/leaderboard`, `GET /api/users/:tên`, `GET /api/matches?mine=1|user=<tên>`.
-CSDL: migration v2 trong `db.js` — `users`, `sessions`, cột `entries.user_id`, `matches.blue_user_id/red_user_id`.
+API: `POST /api/auth/register|login|admin-verify|logout|password|lang`, `GET /api/auth/me`, `GET /api/leaderboard`, `GET /api/users/:tên`, `GET /api/matches?mine=1|user=<tên>`.
+CSDL: migration v2 trong `db.js` — `users`, `sessions`, cột `entries.user_id`, `matches.blue_user_id/red_user_id`; v4 — `sessions.admin_verified`. `GET /api/users/:tên` có thêm `byGame` (thắng/thua/hòa theo từng trò chơi) cho trang người chơi.
 
 ## 3. Lỗi "Ace Editor không nhận 2 ngôn ngữ / chạy bị lỗi" (#1) — các nguyên nhân thật tìm được
 
@@ -39,5 +54,5 @@ CSDL: migration v2 trong `db.js` — `users`, `sessions`, cột `entries.user_id
 ### Gia cố khi chạy code người lạ (làm kèm)
 - Tiến trình bot **không còn thừa hưởng biến môi trường của server** (trước đây `process.env.ADMIN_KEY` đọc được từ bot!). Có test.
 - Bot in quá 1MB bị dừng; JS bot chạy bằng đúng `node` của server.
-- `/api/run-bot-move`: giới hạn tần suất, giới hạn 100KB, và `ALLOW_LOCAL_RUN=0` để tắt hẳn khi mở ra Internet.
+- `/api/run-bot-move`: chỉ cho tài khoản đã đăng nhập, hạn mức theo tài khoản (`LOCAL_RUN_PER_MIN`, `LOCAL_RUN_PARALLEL`, `LOCAL_NEW_CODE_PER_MIN`) cộng giới hạn theo IP, giới hạn 100KB, và `ALLOW_LOCAL_RUN=0` để tắt hẳn khi mở ra Internet.
 - Cách ly thật (bubblewrap) đã có từ phiên bản sau — xem [`SECURITY.md`](SECURITY.md).

@@ -34,15 +34,13 @@
 
     // ---------- accounts & admin ----------
     // Logged-in state lives in an HttpOnly session cookie; the page only learns it through /api/auth/me.
-    // `adminKey` is the legacy/scripting path (X-Admin-Key header) for people who are not logged in.
-    let adminKey = sessionStorage.getItem('ott_admin_key') || '';
+    // Logging in (players and admins, admin = password + ADMIN_KEY) happens on login.html.
     let GAMES = {};         // id -> { id, name, short, description, botHint }  (from /api/games)
     let me = null;          // { id, username, role, elo, ... } or null
     let isAdmin = false;
 
     async function api(method, url, body, headers) {
         const h = { 'Content-Type': 'application/json', ...(headers || {}) };
-        if (adminKey) h['X-Admin-Key'] = adminKey;
         const res = await fetch(url, { method, headers: h, body: body ? JSON.stringify(body) : undefined });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -54,13 +52,11 @@
     }
 
     function renderAuthButtons() {
-        const ub = $('#user-btn'), lo = $('#logout-btn'), ab = $('#admin-btn');
-        ub.textContent = me ? `👤 ${me.username} · ${me.elo}` : '🔐 Đăng nhập';
+        const ub = $('#user-btn'), lo = $('#logout-btn');
+        ub.textContent = me ? `${isAdmin ? '🛡' : '👤'} ${me.username}${isAdmin ? ' · admin' : ` · ${me.elo}`}` : '🔐 Đăng nhập';
         ub.title = me ? 'Xem hồ sơ của bạn' : 'Đăng nhập / Tạo tài khoản';
         lo.style.display = me ? '' : 'none';
-        ab.textContent = isAdmin ? '🛡 Admin' : '🔑 Admin';
         $('#nav-admin').style.display = isAdmin ? '' : 'none';
-        ab.title = isAdmin ? 'Bạn đang có quyền quản trị' : 'Nhập khóa admin để nhận quyền quản trị';
     }
 
     async function refreshMe() {
@@ -69,75 +65,20 @@
             me = out.user;
             isAdmin = !!out.isAdmin;
         } catch (e) { me = null; isAdmin = false; }
-        if (adminKey && !isAdmin) { adminKey = ''; sessionStorage.removeItem('ott_admin_key'); }
         renderAuthButtons();
     }
 
-    // --- login / register dialog ---
-    const dlg = $('#auth-dialog');
-    let authMode = 'login';
-    function setAuthMode(mode) {
-        authMode = mode;
-        $('#auth-title').textContent = mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản';
-        $('#auth-submit').textContent = mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản';
-        $('#auth-pass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
-        $('#auth-tab-login').classList.toggle('btn-primary', mode === 'login');
-        $('#auth-tab-register').classList.toggle('btn-primary', mode === 'register');
-        $('#auth-msg').textContent = '';
-    }
+    // --- login lives on its own page; come back here afterwards ---
     function openAuth(mode) {
-        setAuthMode(mode || 'login');
-        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
-        $('#auth-user').focus();
+        const next = location.pathname + location.hash;
+        location.href = `/login.html?next=${encodeURIComponent(next)}${mode === 'register' ? '&mode=register' : ''}`;
     }
-    const closeAuth = () => { if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open'); };
     window.openAuthDialog = openAuth;
-    $('#auth-close').addEventListener('click', closeAuth);
-    $('#auth-tab-login').addEventListener('click', () => setAuthMode('login'));
-    $('#auth-tab-register').addEventListener('click', () => setAuthMode('register'));
-    async function submitAuth() {
-        const btn = $('#auth-submit');
-        btn.disabled = true;
-        try {
-            await api('POST', `/api/auth/${authMode}`, { username: $('#auth-user').value.trim(), password: $('#auth-pass').value });
-            $('#auth-pass').value = '';
-            closeAuth();
-            await refreshMe();
-            toast(authMode === 'login' ? `Xin chào, ${me.username}!` : `Đã tạo tài khoản ${me.username}`);
-            route();
-        } catch (e) { $('#auth-msg').textContent = '❌ ' + e.message; }
-        finally { btn.disabled = false; }
-    }
-    $('#auth-submit').addEventListener('click', submitAuth);
-    $('#auth-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth(); });
-    $('#auth-user').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#auth-pass').focus(); });
 
     $('#user-btn').addEventListener('click', () => { if (me) location.hash = `#/profile/${encodeURIComponent(me.username)}`; else openAuth('login'); });
     $('#logout-btn').addEventListener('click', async () => {
         try { await api('POST', '/api/auth/logout'); } catch (e) { }
-        adminKey = ''; sessionStorage.removeItem('ott_admin_key');
-        await refreshMe();
-        toast('Đã đăng xuất');
-        route();
-    });
-
-    $('#admin-btn').addEventListener('click', async () => {
-        if (isAdmin) return toast(me ? 'Tài khoản của bạn đã là admin' : 'Đang dùng khóa admin tạm thời (hết khi đóng tab)');
-        const key = prompt('Nhập ADMIN_KEY (xem trong console của server):');
-        if (!key) return;
-        try {
-            if (me) {   // logged in: the key is consumed once and the ACCOUNT becomes admin
-                await api('POST', '/api/auth/claim-admin', { key: key.trim() });
-                toast('Tài khoản của bạn đã trở thành admin');
-            } else {    // not logged in: keep the key for this tab only
-                adminKey = key.trim();
-                await api('POST', '/api/admin/check');
-                sessionStorage.setItem('ott_admin_key', adminKey);
-                toast('Đã bật quyền admin tạm thời (đăng nhập để lưu vĩnh viễn)');
-            }
-        } catch (e) { adminKey = ''; sessionStorage.removeItem('ott_admin_key'); toast('Sai khóa admin', true); }
-        await refreshMe();
-        route();
+        location.replace('/login.html');
     });
 
     // ---------- theme (shares the main page's key) ----------
@@ -165,6 +106,8 @@
         ['live_snapshot', 'live_game_start', 'live_game_move', 'live_game_end', 'tournament_updated', 'tournament_list_changed']
             .forEach(ev => socket.on(ev, (p) => { if (socketHandlers[ev]) socketHandlers[ev](p); }));
         socket.on('connect', () => { if (watching) socket.emit('watch_tournament', watching); });
+        // logged out elsewhere / password reset / role changed: the server closed this socket
+        socket.on('session_revoked', () => { refreshMe().then(route); toast('Phiên đăng nhập đã kết thúc', true); setTimeout(() => socket.connect(), 500); });
     }
 
     // ---------- board rendering ----------
@@ -227,7 +170,7 @@
             else if (parts[0] === 'matches') { setNav('matches'); await viewMatches(); }
             else if (parts[0] === 'admin' && parts[1] === 'edit' && parts[2]) { setNav('admin'); await viewTournamentEditor(parts[2]); }
             else if (parts[0] === 'admin') { setNav('admin'); await viewAdmin(); }
-            else if (parts[0] === 'login') { location.hash = '#/tournaments'; if (!me) openAuth('login'); }
+            else if (parts[0] === 'login') { if (!me) return openAuth('login'); location.hash = '#/tournaments'; }
             else if (parts[0] === 'leaderboard') { setNav('leaderboard'); await viewLeaderboard(); }
             else if (parts[0] === 'profile' && parts[1]) { setNav(me && me.username.toLowerCase() === decodeURIComponent(parts[1]).toLowerCase() ? 'profile' : 'leaderboard'); await viewProfile(decodeURIComponent(parts[1])); }
             else if (parts[0] === 'match' && parts[1]) { setNav('matches'); await viewMatch(+parts[1]); }
@@ -255,7 +198,7 @@
                         <div class="small" style="margin-top:.4rem">👥 ${t.entryCount} bot${t.champion ? ` · 🥇 <strong>${esc(t.champion)}</strong>` : ''}</div>
                         <div class="muted small">${fmtTime(t.createdAt)}</div>
                     </a>`).join('')}</div>`
-                    : `<div class="card empty">Chưa có giải đấu nào.${isAdmin ? '' : '<br>Nhận quyền Admin (🔑) để tạo giải đấu mới.'}</div>`}`;
+                    : `<div class="card empty">Chưa có giải đấu nào.${isAdmin ? '' : '<br>Đăng nhập bằng tài khoản admin để tạo giải đấu mới.'}</div>`}`;
         };
         await draw();
         onSocket('tournament_list_changed', debounce(() => draw().catch(() => { }), 400));
@@ -287,17 +230,20 @@
     }
 
     function seriesCardHTML(s) {
+        const decided = (s.status === 'done' || s.status === 'bye') && s.winnerEntry;
         const row = (side, wins) => {
             const e = s[side];
-            const isWin = s.status === 'done' && e && s.winnerEntry === e.id;
-            return `<div class="sc-row ${isWin ? 'win' : ''}">
+            const isWin = decided && e && s.winnerEntry === e.id;
+            const isLose = decided && e && !isWin;
+            return `<div class="sc-row ${isWin ? 'win' : ''}${isLose ? ' lose' : ''}" data-side="${side}">
                 <span class="seed">${e && e.seed ? e.seed : ''}</span>
-                <span class="nm ${e ? '' : 'tbd'}">${e ? esc(e.name) : (s.status === 'bye' ? '—' : 'Chờ kết quả')}</span>
+                <span class="nm ${e ? '' : 'tbd'}">${isWin ? '<span class="adv" title="Đi tiếp">▶</span> ' : ''}${e ? esc(e.name) : (s.status === 'bye' ? '—' : 'Chờ kết quả')}</span>
                 <span class="sc-score">${s.gamesPlayed || s.status === 'done' ? wins : ''}</span></div>`;
         };
         const games = s.matches.map(m => `<a href="#/match/${m.id}" title="${esc(m.blueName)} vs ${esc(m.redName)}">V${m.gameNo}</a>`).join(' ');
         const status = s.status === 'done' && s.decidedBy && s.decidedBy !== 'score' ? `${SERIES_STATUS.done} (${DECIDED[s.decidedBy] || s.decidedBy})` : SERIES_STATUS[s.status];
-        return `<div class="sc ${s.status}">${row('a', s.winsA)}${row('b', s.winsB)}
+        const winSide = decided ? (s.a && s.winnerEntry === s.a.id ? 'a' : 'b') : '';
+        return `<div class="sc ${s.status}" data-sid="${s.id}" data-round="${s.round}" data-slot="${s.slot}" data-win="${winSide}">${row('a', s.winsA)}${row('b', s.winsB)}
             <div class="sc-foot"><span>BO${s.bestOf} · ${status}</span>${s.draws ? `<span>(${s.draws} hòa)</span>` : ''}${games}</div>${seriesAdminHTML(s)}</div>`;
     }
 
@@ -308,9 +254,57 @@
         const rounds = [];
         for (let r = 1; r <= total; r++) rounds.push(ko.filter(s => s.round === r).sort((a, b) => a.slot - b.slot));
         const third = series.find(s => s.stage === 'third_place');
-        return `<div class="card"><h2>${format === 'round_robin' ? '⚔️ Playoff tranh ngôi đầu (bảng xếp hạng đồng hạng hoàn toàn)' : '🏆 Nhánh đấu'}</h2><div class="bracket">
+        const final = rounds[total - 1][0];
+        const champ = final && final.winnerEntry ? [final.a, final.b].find(e => e && e.id === final.winnerEntry) : null;
+        return `<div class="card"><div class="row between"><h2>${format === 'round_robin' ? '⚔️ Playoff tranh ngôi đầu (bảng xếp hạng đồng hạng hoàn toàn)' : '🏆 Nhánh đấu'}</h2>
+            <div class="b-legend small"><span><i class="lg win"></i>Thắng, đi tiếp</span><span><i class="lg run"></i>Đang đấu</span><span><i class="lg wait"></i>Chưa đấu</span><span><i class="lg out"></i>Bị loại</span></div></div>
+            <div class="bracket">
             ${rounds.map((list, i) => `<div class="b-round"><div class="b-title">${roundName(i + 1, total)}</div>${list.map(seriesCardHTML).join('')}</div>`).join('')}
+            <div class="b-round b-champ-col"><div class="b-title">Vô địch</div>
+                <div class="b-champ ${champ ? 'won' : ''}" data-champ="1">🏆 ${champ ? esc(champ.name) : '<span class="muted">Chưa xác định</span>'}</div></div>
+            <svg class="b-lines" aria-hidden="true"></svg>
             </div>${third ? `<h3 style="margin-top:.6rem">🥉 Tranh hạng 3</h3><div style="max-width:260px">${seriesCardHTML(third)}</div>` : ''}</div>`;
+    }
+
+    // Connector lines of the knockout tree: each pairing feeds the next round (slot s -> slot floor(s/2)).
+    // The line starts at the WINNER's row once a pairing is decided, so you can follow who went through.
+    let bracketObserver = null;
+    function drawBracketLines(root) {
+        if (bracketObserver) { bracketObserver.disconnect(); bracketObserver = null; }
+        const br = root.querySelector('.bracket');
+        if (!br) return;
+        const svg = br.querySelector('.b-lines');
+        const draw = () => {
+            const base = br.getBoundingClientRect();
+            const pos = (el) => { const r = el.getBoundingClientRect(); return { l: r.left - base.left + br.scrollLeft, r: r.right - base.left + br.scrollLeft, t: r.top - base.top + br.scrollTop, h: r.height }; };
+            const cards = new Map();
+            br.querySelectorAll('.sc[data-round]').forEach(el => cards.set(`${el.dataset.round}:${el.dataset.slot}`, el));
+            const rounds = Math.max(0, ...[...cards.keys()].map(k => +k.split(':')[0]));
+            const paths = [];
+            const link = (from, to, cls) => {
+                const a = pos(from);
+                const winRow = from.dataset.win ? from.querySelector(`.sc-row[data-side="${from.dataset.win}"]`) : null;
+                const y1 = winRow ? pos(winRow).t + pos(winRow).h / 2 : a.t + a.h / 2;
+                const b = pos(to);
+                const y2 = b.t + b.h / 2;
+                const x1 = a.r, x2 = b.l, xm = x1 + (x2 - x1) / 2;
+                paths.push(`<path class="${cls}" d="M${x1} ${y1} H${xm} V${y2} H${x2}"/>`);
+                if (cls === 'win') paths.push(`<circle class="win" cx="${x1}" cy="${y1}" r="3.5"/>`);
+            };
+            cards.forEach((el, key) => {
+                const [r, slot] = key.split(':').map(Number);
+                const st = el.classList.contains('running') ? 'run' : el.dataset.win ? 'win' : 'wait';
+                const target = r < rounds ? cards.get(`${r + 1}:${Math.floor(slot / 2)}`) : br.querySelector('[data-champ]');
+                if (target) link(el, target, st);
+            });
+            const w = Math.max(br.scrollWidth, br.clientWidth), h = Math.max(br.scrollHeight, br.clientHeight);
+            svg.setAttribute('width', w); svg.setAttribute('height', h);
+            svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+            // winners last so their lines are drawn on top where paths share a segment
+            svg.innerHTML = paths.sort((p, q) => (p.includes('class="win"') ? 1 : 0) - (q.includes('class="win"') ? 1 : 0)).join('');
+        };
+        draw();
+        if (typeof ResizeObserver === 'function') { bracketObserver = new ResizeObserver(() => draw()); bracketObserver.observe(br); }
     }
 
     function groupsHTML(d) {
@@ -397,6 +391,7 @@
                 </tbody></table></div>` : '<p class="muted">Chưa có ai đăng ký.</p>'}</div>`;
 
             body.innerHTML = (t.status === 'registration' ? entriesCard : '') + groupsHTML(data) + bracketHTML(data.series, data.tournament.format) + (t.status !== 'registration' ? entriesCard : '');
+            drawBracketLines(body);
             drawLive();
         }
 
@@ -565,7 +560,10 @@
 
         await loadAll();
         if (socket) { watching = tid; socket.emit('watch_tournament', tid); }
-        cleanup = () => { top.removeEventListener('click', onAdmin); body.removeEventListener('click', onAdmin); };
+        cleanup = () => {
+            top.removeEventListener('click', onAdmin); body.removeEventListener('click', onAdmin);
+            if (bracketObserver) { bracketObserver.disconnect(); bracketObserver = null; }
+        };
     }
 
     // =====================================================================
@@ -623,21 +621,40 @@
     // Admin: dashboard (tournaments, users) and the tournament / rules editor (issue #4)
     // =====================================================================
     async function viewAdmin(tab) {
-        tab = tab || 'tournaments';
+        tab = tab || 'overview';
         if (!isAdmin) {
-            view.innerHTML = `<div class="card empty">🔒 Chỉ admin mới vào được trang này.<br>Đăng nhập rồi bấm 🔑 và nhập ADMIN_KEY một lần để nhận quyền.</div>`;
+            view.innerHTML = `<div class="card empty">🔒 Chỉ admin mới vào được trang này.<br>${me ? 'Tài khoản của bạn không có quyền quản trị.' : '<a href="/login.html?next=%2Farena.html%23%2Fadmin">Đăng nhập bằng tài khoản admin</a> (mật khẩu, sau đó khóa admin).'}</div>`;
             return;
         }
         view.innerHTML = `<div class="row between" style="margin-bottom:1rem"><h1>🛠 Quản trị</h1>
             <a class="btn btn-primary" href="#/admin/edit/new" style="text-decoration:none">➕ Tạo giải đấu</a></div>
             <div class="tabs">
+                <button class="btn ${tab === 'overview' ? 'active' : ''}" data-tab="overview">📊 Tổng quan</button>
                 <button class="btn ${tab === 'tournaments' ? 'active' : ''}" data-tab="tournaments">🏆 Giải đấu</button>
                 <button class="btn ${tab === 'users' ? 'active' : ''}" data-tab="users">👥 Người dùng</button>
                 <button class="btn ${tab === 'security' ? 'active' : ''}" data-tab="security">🛡 Bảo mật</button>
                 <button class="btn ${tab === 'backups' ? 'active' : ''}" data-tab="backups">💾 Sao lưu</button></div>
             <div id="adm-body"><div class="empty">Đang tải…</div></div>`;
         view.querySelector('.tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) viewAdmin(b.dataset.tab); });
-        if (tab === 'users') await adminUsers(); else if (tab === 'security') await adminSecurity(); else if (tab === 'backups') await adminBackups(); else await adminTournaments();
+        if (tab === 'overview') await adminOverview();
+        else if (tab === 'users') await adminUsers();
+        else if (tab === 'security') await adminSecurity();
+        else if (tab === 'backups') await adminBackups();
+        else await adminTournaments();
+    }
+
+    async function adminOverview() {
+        const [stats, tournaments] = await Promise.all([
+            api('GET', '/api/admin/overview'),
+            api('GET', '/api/tournaments')
+        ]);
+        const openTournaments = tournaments.filter(t => t.status === 'registration' || t.status === 'running').length;
+        $('#adm-body').innerHTML = `<div class="stat-grid admin-overview-grid">
+            <div class="stat overview-card overview-users"><div class="overview-card-heading"><span>Người chơi toàn hệ thống</span><span class="overview-icon" aria-hidden="true">♟</span></div><b>${stats.users}</b><small>Tài khoản đã đăng ký</small></div>
+            <div class="stat overview-card overview-tournaments"><div class="overview-card-heading"><span>Giải đấu đang mở</span><span class="overview-icon" aria-hidden="true">♜</span></div><b>${openTournaments}</b><small>Trong ${tournaments.length} giải đấu</small></div>
+            <div class="stat overview-card overview-submissions"><div class="overview-card-heading"><span>Bài nộp của người dùng</span><span class="overview-icon" aria-hidden="true">⌘</span></div><b>${stats.submissions}</b><small>Bot đã đăng ký vào giải đấu</small></div>
+            <div class="stat overview-card overview-matches"><div class="overview-card-heading"><span>Trận đấu đang chạy</span><span class="overview-icon" aria-hidden="true">⚔</span></div><b>${stats.matches}</b><small>Đang diễn ra trực tiếp</small></div>
+        </div>`;
     }
 
     async function adminTournaments() {
@@ -708,7 +725,7 @@
                 const b = e.target.closest('[data-dl]');
                 if (!b) return;
                 try {   // fetch (not a plain link) so the admin key header also works
-                    const res = await fetch(`/api/admin/backups/${encodeURIComponent(b.dataset.dl)}`, { headers: adminKey ? { 'X-Admin-Key': adminKey } : {} });
+                    const res = await fetch(`/api/admin/backups/${encodeURIComponent(b.dataset.dl)}`, { credentials: 'same-origin' });
                     if (!res.ok) throw new Error('Không tải được');
                     const url = URL.createObjectURL(await res.blob());
                     const a = document.createElement('a'); a.href = url; a.download = b.dataset.dl; a.click();

@@ -128,10 +128,13 @@ npm start
 ```
 Truy cập trình duyệt: **`http://localhost:3000`** (hoặc `http://<dia_chi_ip_lan>:3000` từ máy tính khác trong cùng mạng LAN / Wi-Fi để cùng đấu Online).
 
+Luồng trang: **Đăng nhập / đăng ký** (`login.html`) → **Trang người chơi** (`home.html`: thành tích, lịch sử, chọn trò chơi) → **Trò chơi** (`index.html` Oẳn tù tì, `caro.html` Cờ Caro). Người mới đọc **`guide.html`** (luật chơi, cách viết bot, chiến thuật mẫu).
+Admin dùng cùng trang đăng nhập: tài khoản `admin` (tạo sẵn lúc khởi động, mật khẩu = `ADMIN_PASSWORD` hoặc in ra console) → nhập thêm **khóa admin** (`ADMIN_KEY`) → vào thẳng trang quản trị. Chi tiết: [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md).
+
 
 ---
 
 ## 🏆 Giải đấu & Lịch sử trận
 
 Mở **`http://localhost:3000/arena.html`**: tạo giải (loại trực tiếp / vòng tròn / chia bảng + knockout), đăng ký bot, xem nhánh đấu & bảng xếp hạng trực tiếp, xem lại mọi trận đã đấu.
-Dữ liệu lưu trong SQLite (`data/ott.db`). Đặt `ADMIN_KEY` trước khi chạy `npm start` để dùng quyền admin. Chi tiết: [`docs/TOURNAMENT.md`](docs/TOURNAMENT.md) [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) (tài khoản, Elo, sửa lỗi chạy bot) [`docs/ADMIN.md`](docs/ADMIN.md) (trang quản trị: luật, thế cờ, thời gian, sửa kết quả) [`docs/SECURITY.md`](docs/SECURITY.md) (cách ly code bot — nên đọc trước khi mở ra Internet), [`docs/DEPLOY.md`](docs/DEPLOY.md) (nginx/HTTPS, Docker, sao lưu, vận hành) và [`docs/GAMES.md`](docs/GAMES.md) (Cờ Caro và cách thêm trò chơi mới). Chạy kiểm thử: `npm test`.
+Dữ liệu lưu trong SQLite (`data/ott.db`). Đặt `ADMIN_PASSWORD` và `ADMIN_KEY` trước khi chạy `npm start` (xem `.env.example`). Chi tiết: [`docs/TOURNAMENT.md`](docs/TOURNAMENT.md) [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) (tài khoản, Elo, sửa lỗi chạy bot) [`docs/ADMIN.md`](docs/ADMIN.md) (trang quản trị: luật, thế cờ, thời gian, sửa kết quả) [`docs/SECURITY.md`](docs/SECURITY.md) (cách ly code bot — nên đọc trước khi mở ra Internet), [`docs/DEPLOY.md`](docs/DEPLOY.md) (nginx/HTTPS, Docker, sao lưu, vận hành) và [`docs/GAMES.md`](docs/GAMES.md) (Cờ Caro và cách thêm trò chơi mới). Chạy kiểm thử: `npm test`.

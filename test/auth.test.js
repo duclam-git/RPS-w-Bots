@@ -52,7 +52,7 @@ async function account(name, password = 'password-123') {
 test.before(async () => {
     server = spawn(process.execPath, ['server.js'], {
         cwd: path.join(__dirname, '..'),
-        env: { ...process.env, PORT: String(PORT), DB_PATH: DB, ADMIN_KEY, DISABLE_RATE_LIMIT: '1', LEADERBOARD_PATH: LB },
+        env: { ...process.env, PORT: String(PORT), DB_PATH: DB, ADMIN_KEY, DISABLE_RATE_LIMIT: '1', ADMIN_KEY_HEADER: '1', ALLOW_GUEST_ROOMS: '1', ADMIN_PASSWORD: 'admin-pass-123', LEADERBOARD_PATH: LB },
         stdio: ['ignore', 'pipe', 'pipe']
     });
     await new Promise((resolve, reject) => {
@@ -118,16 +118,81 @@ test('CSRF: state-changing requests from a foreign Origin are rejected', async (
     assert.strictEqual(same.status, 200);
 });
 
-test('admin: claiming the key once makes the account an admin; wrong key is refused', async () => {
-    const c = await account('FutureAdmin');
+test('admin: one login page, password then ADMIN_KEY; only key-verified sessions are admin', async () => {
+    // the seeded admin account cannot be registered by somebody else
+    assert.strictEqual((await new Client().call('POST', '/api/auth/register', { username: 'ADMIN', password: 'password-123' })).status, 409);
+
+    // step 1: right password -> NO session yet, only a short-lived HttpOnly challenge scoped to /api/auth
+    const c = new Client();
+    const s1 = await c.call('POST', '/api/auth/login', { username: 'admin', password: 'admin-pass-123' });
+    assert.strictEqual(s1.status, 200);
+    assert.strictEqual(s1.json.needAdminKey, true);
+    assert.ok(!s1.json.user, 'no user/session before the key');
+    const ch = s1.setCookie.find(x => x.startsWith('ott_admin_challenge='));
+    assert.ok(ch && /HttpOnly/i.test(ch) && /SameSite=Strict/i.test(ch) && /Path=\/api\/auth/i.test(ch), ch);
+    assert.ok(!s1.setCookie.some(x => x.startsWith('ott_session=')), 'no session cookie in step 1');
+    const challengeOnly = c.cookie;
     assert.strictEqual((await c.call('POST', '/api/tournaments', { name: 'x', format: 'single_elim' })).status, 401);
-    assert.strictEqual((await c.call('POST', '/api/auth/claim-admin', { key: 'wrong' })).status, 403);
-    assert.strictEqual((await c.call('POST', '/api/auth/claim-admin', { key: ADMIN_KEY })).status, 200);
+
+    // step 2: wrong key counts down, right key opens an admin session (shorter lifetime than a player's)
+    c.cookie = challengeOnly;
+    const bad = await c.call('POST', '/api/auth/admin-verify', { key: 'wrong' });
+    assert.strictEqual(bad.status, 403);
+    c.cookie = challengeOnly;
+    const ok = await c.call('POST', '/api/auth/admin-verify', { key: ADMIN_KEY });
+    assert.strictEqual(ok.status, 200, JSON.stringify(ok.json));
+    assert.strictEqual(ok.json.redirect, '/arena.html#/admin');
+    const sess = ok.setCookie.find(x => x.startsWith('ott_session='));
+    const maxAge = Number(/Max-Age=(\d+)/.exec(sess)[1]);
+    assert.ok(maxAge <= 8 * 3600, 'admin session is short-lived: ' + maxAge);
     assert.strictEqual((await c.call('GET', '/api/auth/me')).json.isAdmin, true);
-    const t = await c.call('POST', '/api/tournaments', { name: 'Admin by account', format: 'single_elim' });
-    assert.strictEqual(t.status, 201);                               // no X-Admin-Key header needed any more
-    // the old key header still works for scripts
+    assert.strictEqual((await c.call('POST', '/api/tournaments', { name: 'Admin by account', format: 'single_elim' })).status, 201);
+
+    // the challenge is single use
+    const replay = new Client(); replay.cookie = challengeOnly;
+    assert.strictEqual((await replay.call('POST', '/api/auth/admin-verify', { key: ADMIN_KEY })).status, 401);
+
+    // three wrong keys burn the challenge: start again from the password
+    const d = new Client();
+    await d.call('POST', '/api/auth/login', { username: 'admin', password: 'admin-pass-123' });
+    const dch = d.cookie;
+    for (let i = 0; i < 2; i++) { d.cookie = dch; assert.strictEqual((await d.call('POST', '/api/auth/admin-verify', { key: 'nope' })).status, 403); }
+    d.cookie = dch;
+    const third = await d.call('POST', '/api/auth/admin-verify', { key: 'nope' });
+    assert.strictEqual(third.json.restart, true);
+    d.cookie = dch;
+    assert.strictEqual((await d.call('POST', '/api/auth/admin-verify', { key: ADMIN_KEY })).status, 401, 'burnt challenge');
+
+    // the key alone does not make anybody admin any more
+    const p = await account('FutureAdmin');
+    assert.strictEqual((await p.call('POST', '/api/auth/claim-admin', { key: ADMIN_KEY })).status, 410);
+    assert.strictEqual((await p.call('GET', '/api/auth/me')).json.isAdmin, false);
+    // players land on their home page
+    const pl = await new Client().call('POST', '/api/auth/login', { username: 'FutureAdmin', password: 'password-123' });
+    assert.strictEqual(pl.json.redirect, '/home.html');
+    // the scripting header works only because this test server sets ADMIN_KEY_HEADER=1
     assert.strictEqual((await new Client().call('POST', '/api/tournaments', { name: 'k', format: 'single_elim' }, { 'x-admin-key': ADMIN_KEY })).status, 201);
+});
+
+test('player area pages need a session; login page sends logged-in users onwards', async () => {
+    const get = (url, cookie) => fetch(BASE + url, { redirect: 'manual', headers: cookie ? { cookie } : {} });
+    for (const page of ['/', '/home.html', '/index.html', '/caro.html']) {
+        const r = await get(page);
+        assert.strictEqual(r.status, 302, page);
+        assert.ok(r.headers.get('location').startsWith('/login.html'), page);
+    }
+    assert.strictEqual((await get('/login.html')).status, 200);
+    assert.strictEqual((await get('/guide.html')).status, 200);
+    assert.strictEqual((await get('/arena.html')).status, 200, 'tournaments stay public to watch');
+    const u = await account('PageUser');
+    assert.strictEqual((await get('/home.html', u.cookie)).status, 200);
+    assert.strictEqual((await get('/caro.html', u.cookie)).status, 200);
+    const lr = await get('/login.html', u.cookie);
+    assert.strictEqual(lr.status, 302);
+    assert.strictEqual(lr.headers.get('location'), '/home.html');
+    const w = await get('/bot_worker.js', u.cookie);
+    assert.strictEqual(w.headers.get('content-security-policy'), "default-src 'none'; script-src 'self' 'unsafe-eval'", 'bot worker: eval yes, network no');
+    assert.strictEqual((await get('/data/ott.db')).status, 404);
 });
 
 test('tournament registration with accounts: login required, name = account, one entry each, owner-only edits', async () => {
@@ -228,4 +293,21 @@ test('password change signs out other devices', async () => {
     assert.strictEqual((await laptop.call('GET', '/api/auth/me')).json.user, null, 'other device is signed out');
     assert.strictEqual((await phone.call('GET', '/api/auth/me')).json.user.username, 'Multi_Dev');
     assert.strictEqual((await new Client().call('POST', '/api/auth/login', { username: 'Multi_Dev', password: 'new-password-1' })).status, 200);
+});
+
+test('practice games of both games are re-played by the server before they enter the history', async () => {
+    const c = await account('PracticeUser');
+    // 3x3 caro, Blue wins on the diagonal
+    const moves = [[0, 0], [0, 1], [1, 1], [0, 2], [2, 2]].map(([r, cc], i) => ({ player: i % 2 ? 2 : 1, to: { r, c: cc } }));
+    const ok = await c.call('POST', '/api/matches/local', { game: 'caro', rules: { size: 3, winLength: 3 }, mine: ['blue'], blue: { name: 'me' }, red: { name: 'bot' }, moves });
+    assert.strictEqual(ok.status, 201, JSON.stringify(ok.json));
+    const m = (await c.call('GET', `/api/matches/${ok.json.id}`)).json;
+    assert.deepStrictEqual([m.game, m.winner, m.rules.rows], ['caro', 'blue', 3]);
+    // a forged game (Red claims a cell twice) and bad rules are refused
+    const forged = moves.slice(0, 3).concat([{ player: 2, to: { r: 1, c: 1 } }]);
+    assert.strictEqual((await c.call('POST', '/api/matches/local', { game: 'caro', rules: { size: 3, winLength: 3 }, moves: forged })).status, 422);
+    assert.strictEqual((await c.call('POST', '/api/matches/local', { game: 'caro', rules: { size: 3, winLength: 6 }, moves })).status, 400);
+    assert.strictEqual((await c.call('POST', '/api/matches/local', { game: 'chess', moves })).status, 400);
+    const prof = (await c.call('GET', '/api/users/PracticeUser')).json;
+    assert.deepStrictEqual(prof.byGame.caro, { games: 1, wins: 1, losses: 0, draws: 0 });
 });

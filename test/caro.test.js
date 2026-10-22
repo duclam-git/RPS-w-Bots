@@ -173,7 +173,7 @@ test('DB upgrade v2 -> v3 keeps every existing match and move, and new games can
     const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
     assert.strictEqual(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);
-    assert.strictEqual(out.version, 3);
+    assert.strictEqual(out.version, 4);          // v4 (admin-verified sessions) runs on top
     assert.deepStrictEqual(out.moves, [[1, 1, [4, 1], [3, 2], null, false, 'x'], [2, 2, [4, 7], [5, 6], 'scissors', true, 'y']]);
     assert.strictEqual(out.game, 'rps');
     assert.strictEqual(out.tgame, 'rps');
@@ -181,4 +181,54 @@ test('DB upgrade v2 -> v3 keeps every existing match and move, and new games can
     assert.strictEqual(out.listed, '1/2');
     assert.strictEqual(out.fk, 0);
     for (const f of [file, file + '-wal', file + '-shm']) { try { fs.unlinkSync(f); } catch (e) {} }
+});
+
+test('every caro strategy sample (all languages) compiles in the real sandbox and answers with legal moves', async () => {
+    require('../caro_strategies.js');
+    const S = global.window.CARO_STRATEGIES;
+    assert.deepStrictEqual(Object.keys(S), ['random', 'center', 'attacker', 'defender', 'balanced', 'minimax']);
+    const rules = caro.resolveRules({ size: 9, winLength: 5 });
+    for (const [id, s] of Object.entries(S)) {
+        for (const [lang, code] of Object.entries(s.code)) {
+            if (!code || (lang === 'python' && !hasPy) || (lang === 'cpp' && !hasGpp)) continue;
+            const p = await runner.prepareBot(`strat_${id}_${lang}`, lang, code, { game: caro });
+            assert.ok(p.success, `${id}/${lang}: ${p.error}`);
+            const smoke = await mp.smokeTest(p.botHandler, { ...rules, moveTimeoutMs: 8000 }, caro);
+            assert.ok(smoke.ok, `${id}/${lang}: ${smoke.errors}`);
+            runner.cleanupBot(p.botHandler);
+        }
+    }
+});
+
+test('caro strategies are really ordered: minimax beats the heuristic bots, every bot beats random', () => {
+    const S = global.window.CARO_STRATEGIES;
+    const rules = caro.resolveRules({ size: 15, winLength: 5 });
+    const fn = (id) => new Function('state', 'helpers', 'log', `${S[id].code.javascript}\nreturn getNextMove(state, helpers, log);`);
+    const helpers = {
+        randomChoice: (a) => a[Math.floor(Math.random() * a.length)],
+        simulateMove: (b, m, p) => caro.simulateMove(b, m, p, rules), checkWin: (b) => caro.checkWin(b, rules)
+    };
+    const play = (blue, red) => {
+        const board = caro.createInitialBoard(rules);
+        const bots = { 1: fn(blue), 2: fn(red) }, moves = [];
+        for (let p = 1; ; p = 3 - p) {
+            const legal = caro.getLegalMoves(p, board, rules);
+            const mv = caro.matchMove(legal, bots[p](caro.botState({ board, player: p, legalMoves: legal, rules, moves }), helpers, () => {}));
+            assert.ok(mv, `${p === 1 ? blue : red} played an illegal move`);
+            caro.applyMove(board, mv, p, rules);
+            moves.push({ player: p, to: mv.to });
+            const w = caro.checkWin(board, rules).winner;
+            if (w !== null) return w;
+        }
+    };
+    const score = (a, b) => [play(a, b) === 1, play(b, a) === 2].filter(Boolean).length;   // games won by a, both colours
+    for (const id of ['center', 'attacker', 'defender', 'balanced', 'minimax']) {
+        let wins = 0;
+        for (let i = 0; i < 3; i++) wins += score(id, 'random');
+        assert.ok(wins >= 5, `${id} beat random only ${wins}/6`);
+    }
+    // the heuristic bots are deterministic, so 2 games per pairing (one per colour) say it all
+    let mmWins = 0, mmLosses = 0;
+    for (const id of ['attacker', 'defender', 'balanced']) { mmWins += score('minimax', id); mmLosses += score(id, 'minimax'); }
+    assert.ok(mmWins >= 4 && mmWins > mmLosses, `minimax: ${mmWins} wins / ${mmLosses} losses against the heuristic bots`);
 });

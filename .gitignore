@@ -2,3 +2,4 @@ node_modules/
 temp_bots/
 data/
 *.log
+.env

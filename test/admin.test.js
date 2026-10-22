@@ -48,7 +48,7 @@ async function waitFinished(tid) {
 test.before(async () => {
     server = spawn(process.execPath, ['server.js'], {
         cwd: path.join(__dirname, '..'),
-        env: { ...process.env, PORT: String(PORT), DB_PATH: DB, ADMIN_KEY: KEY, DISABLE_RATE_LIMIT: '1', LEADERBOARD_PATH: LB, BACKUP_DIR: BK, BACKUP_KEEP: '2', BACKUP_INTERVAL_HOURS: '0' },
+        env: { ...process.env, PORT: String(PORT), DB_PATH: DB, ADMIN_KEY: KEY, DISABLE_RATE_LIMIT: '1', ADMIN_KEY_HEADER: '1', ALLOW_GUEST_ROOMS: '1', ADMIN_PASSWORD: 'admin-pass-123', LEADERBOARD_PATH: LB, BACKUP_DIR: BK, BACKUP_KEEP: '2', BACKUP_INTERVAL_HOURS: '0' },
         stdio: ['ignore', 'pipe', 'pipe']
     });
     await new Promise((resolve, reject) => {
@@ -217,16 +217,27 @@ test('history: admins can delete online/local records but never tournament games
 // ---------------------------------------------------------------- users
 test('user administration: roles, last-admin guard, password reset revokes sessions', async () => {
     const mk = async (name) => { const c = new Client(); const r = await c.call('POST', '/api/auth/register', { username: name, password: 'password-123' }); return { c, id: r.json.user.id }; };
-    const boss = await mk('Boss_1'), pupil = await mk('Pupil_1');
+    const pupil = await mk('Pupil_1');
     assert.strictEqual((await pupil.c.call('GET', '/api/admin/users')).status, 401);
-    assert.strictEqual((await boss.c.call('POST', '/api/auth/claim-admin', { key: KEY })).status, 200);
+    // the seeded admin account logs in with password + ADMIN_KEY
+    const boss = { c: new Client() };
+    assert.strictEqual((await boss.c.call('POST', '/api/auth/login', { username: 'admin', password: 'admin-pass-123' })).json.needAdminKey, true);
+    const v = await boss.c.call('POST', '/api/auth/admin-verify', { key: KEY });
+    assert.strictEqual(v.status, 200, JSON.stringify(v.json));
+    boss.id = v.json.user.id;
 
     const list = (await boss.c.call('GET', '/api/admin/users')).json;
     assert.ok(list.find(u => u.username === 'Pupil_1') && !JSON.stringify(list).includes('password'));
 
     assert.strictEqual((await boss.c.call('POST', `/api/admin/users/${pupil.id}/role`, { role: 'admin' })).status, 200);
+    // a promotion signs the user out: the new admin must log in again and pass the ADMIN_KEY step
+    assert.strictEqual((await pupil.c.call('GET', '/api/auth/me')).json.user, null);
+    assert.strictEqual((await pupil.c.call('POST', '/api/auth/login', { username: 'Pupil_1', password: 'password-123' })).json.needAdminKey, true);
+    assert.strictEqual((await pupil.c.call('POST', '/api/auth/admin-verify', { key: KEY })).status, 200);
     assert.strictEqual((await pupil.c.call('GET', '/api/auth/me')).json.isAdmin, true);
     assert.strictEqual((await boss.c.call('POST', `/api/admin/users/${pupil.id}/role`, { role: 'user' })).status, 200);
+    assert.strictEqual((await pupil.c.call('GET', '/api/auth/me')).json.user, null, 'demotion ends the admin session too');
+    assert.strictEqual((await pupil.c.call('POST', '/api/auth/login', { username: 'Pupil_1', password: 'password-123' })).status, 200);
     assert.strictEqual((await boss.c.call('POST', `/api/admin/users/${boss.id}/role`, { role: 'user' })).status, 409, 'last admin is protected');
     assert.strictEqual((await boss.c.call('POST', `/api/admin/users/${pupil.id}/role`, { role: 'king' })).status, 400);
 
@@ -484,4 +495,21 @@ test('RPS with a 7x7 board and a reversed capture cycle: stored, played and repl
     // the bot state carried the rules, so JS helpers (canCapture) follow the custom table
     assert.strictEqual(E.canCapture('rock', 'paper', E.resolveRules(m.rules)), true);
     assert.strictEqual(E.canCapture('rock', 'scissors', E.resolveRules(m.rules)), false);
+});
+
+test('admin overview: totals for the dashboard, admin only', async () => {
+    assert.strictEqual((await new Client().call('GET', '/api/admin/overview')).status, 401);
+    const before = (await admin.call('GET', '/api/admin/overview', null, A)).json;
+    for (const k of ['users', 'submissions', 'matches']) assert.ok(Number.isInteger(before[k]), k);
+    assert.ok(before.tournaments.total >= before.tournaments.open);
+
+    const p = new Client();
+    await p.call('POST', '/api/auth/register', { username: 'Overview_Probe', password: 'password-123' });
+    const tid = await create({});
+    assert.strictEqual((await p.call('POST', `/api/tournaments/${tid}/entries`, { name: 'Mine', lang: 'javascript', code: RUSHER })).status, 201);
+    const after = (await admin.call('GET', '/api/admin/overview', null, A)).json;
+    assert.strictEqual(after.users, before.users + 1);
+    assert.strictEqual(after.submissions, before.submissions + 1);
+    assert.strictEqual(after.tournaments.total, before.tournaments.total + 1);
+    assert.strictEqual(after.tournaments.open, before.tournaments.open + 1);
 });

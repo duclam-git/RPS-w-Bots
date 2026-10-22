@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTTv2 — Hướng dẫn cho người mới</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="arena.css">
+    <link rel="stylesheet" href="portal.css">
+    <script>if (localStorage.getItem('ott_theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');</script>
+</head>
+
+<body>
+    <header class="hub-header">
+        <a class="hub-logo" href="home.html">⚔️ <span>OTTv2 CODE ARENA</span></a>
+        <nav class="hub-nav">
+            <a href="home.html">🏠 Trang của tôi</a>
+            <a href="arena.html#/tournaments">🏆 Giải đấu</a>
+            <a href="guide.html" class="active">📘 Hướng dẫn</a>
+        </nav>
+    </header>
+
+    <main class="hub-main guide">
+        <h1>📘 Hướng dẫn cho người mới</h1>
+        <p class="muted">Đọc 5 phút là chơi được. Mỗi phần đều có ví dụ; code mẫu nằm sẵn trong trang chơi (nút “Mẫu bot” / “Nạp mẫu”).</p>
+        <nav class="guide-toc">
+            <a class="btn btn-sm" href="#start">🚀 Bắt đầu nhanh</a>
+            <a class="btn btn-sm" href="#rps">✊ Oẳn tù tì</a>
+            <a class="btn btn-sm" href="#caro">⚫ Cờ Caro</a>
+            <a class="btn btn-sm" href="#bot">🤖 Viết bot</a>
+            <a class="btn btn-sm" href="#strategies">🧠 Chiến thuật mẫu</a>
+            <a class="btn btn-sm" href="#online">🌐 Online &amp; giải đấu</a>
+            <a class="btn btn-sm" href="#faq">❓ Hỏi đáp</a>
+        </nav>
+
+        <section class="card" id="start">
+            <h2>🚀 Bắt đầu nhanh</h2>
+            <ol>
+                <li><strong>Đăng ký</strong> ở <a href="login.html?mode=register">trang đăng nhập</a> (tên 3–20 ký tự, mật khẩu từ 8 ký tự).</li>
+                <li>Bạn vào <strong>Trang của tôi</strong>: thành tích thắng/thua, lịch sử trận, giải đấu đã tham gia.</li>
+                <li><strong>Chọn trò chơi</strong>: Oẳn tù tì hoặc Cờ Caro.</li>
+                <li><strong>Chơi thử bằng tay</strong>: chọn “👤 Người chơi” cho một bên, chọn một bot có sẵn cho bên kia, bấm ▶ Bắt đầu.</li>
+                <li><strong>Viết bot</strong>: chọn “Code” cho một bên, nạp một mẫu chiến thuật, sửa và chạy lại. Lỗi và log của bot hiện ở tab Console.</li>
+                <li><strong>Đấu online</strong> với bạn bè bằng mã phòng, hoặc đăng ký bot vào <a href="arena.html#/tournaments">giải đấu</a>.</li>
+            </ol>
+            <div class="tip">💡 Bot của bạn chỉ là <strong>một hàm</strong>: nhận trạng thái bàn cờ, trả về một nước đi. Máy chủ luôn giữ bàn cờ thật — nước đi sai luật, lỗi hoặc quá giờ sẽ bị thay bằng một nước ngẫu nhiên (đánh dấu ⚠️), nên bot hỏng không làm treo trận.</div>
+        </section>
+
+        <section class="card" id="rps">
+            <h2>✊✋✌️ Oẳn tù tì — Đấu trường quân cờ</h2>
+            <h3>Bàn cờ và quân</h3>
+            <ul>
+                <li>Bàn <strong>9×9</strong>, cột A–I, hàng 1–9. Mỗi bên 10 quân: 3 Đấm ✊, 4 Lá ✋, 3 Kéo ✌️.</li>
+                <li><strong>Xanh</strong> (đi trước) xuất phát góc dưới trái, cần tới ô <strong>I9</strong>. <strong>Đỏ</strong> xuất phát góc trên phải, cần tới ô <strong>A1</strong>.</li>
+            </ul>
+            <h3>Đi quân và ăn quân</h3>
+            <ul>
+                <li>Mỗi lượt đi <strong>một quân, một ô, theo 8 hướng</strong> (như quân Vua cờ vua).</li>
+                <li>Ăn theo oẳn tù tì: <strong>Đấm ăn Kéo, Kéo ăn Lá, Lá ăn Đấm</strong>. Đi vào ô của quân bị khắc chế là ăn quân đó.</li>
+                <li>Hai quân <strong>cùng loại</strong> chặn nhau (không ăn được nhau). Không đi vào ô có quân mình.</li>
+            </ul>
+            <h3>Thắng, thua, hòa</h3>
+            <ul>
+                <li>Thắng ngay khi <strong>một quân bất kỳ chạm ô đích</strong> của mình.</li>
+                <li>Cũng thắng nếu đối thủ <strong>bị ăn hết quân</strong> hoặc <strong>không còn nước đi</strong>.</li>
+                <li>Hòa khi hết giới hạn số nước (luyện tập 2000 nước, online 200 nước, giải đấu do admin đặt) hoặc cả hai cùng hết nước.</li>
+            </ul>
+            <div class="tip">💡 Mẹo cho người mới: đừng chỉ lao về đích. Quân đi một mình dễ bị quân khắc chế chặn và ăn; đi theo cặp khác loại (ví dụ Đấm + Lá) để che cho nhau, và luôn để ý quân nào của đối thủ đang tiến gần ô A1/I9.</div>
+            <p><a class="btn btn-primary" href="index.html">▶ Vào chơi Oẳn tù tì</a></p>
+        </section>
+
+        <section class="card" id="caro">
+            <h2>⚫ Cờ Caro (Gomoku)</h2>
+            <ul>
+                <li>Hai bên lần lượt <strong>đặt một quân</strong> lên một ô trống. <strong>Xanh đi trước.</strong> Quân đã đặt không di chuyển.</li>
+                <li>Ai có <strong>5 quân liên tiếp</strong> theo hàng ngang, dọc hoặc chéo trước thì thắng (luật tự do: 6 quân liền cũng tính). Bàn 3×3 thì cần 3 quân, giống cờ ca-rô 3 ô.</li>
+                <li>Bàn kín mà chưa ai thắng là <strong>hòa</strong>.</li>
+                <li>Cỡ bàn trong trang chơi: 3×3, 9×9, 13×13, 15×15 (mặc định), 19×19.</li>
+            </ul>
+            <p>Ví dụ: Xanh có chuỗi 4 <em>mở hai đầu</em> (ô xanh lá là hai đầu còn trống) — Đỏ chỉ chặn được một đầu nên Xanh chắc thắng:</p>
+            <div class="mini-board" style="grid-template-columns: repeat(7, 26px)">
+                <span></span><span class="w"></span><span class="b">X</span><span class="b">X</span><span class="b">X</span><span class="b">X</span><span class="w"></span>
+                <span></span><span></span><span class="r">Đ</span><span></span><span class="r">Đ</span><span class="r">Đ</span><span></span>
+            </div>
+            <div class="tip">💡 Điều quan trọng nhất trong Caro: <strong>chặn chuỗi 3 mở và chuỗi 4 của đối thủ ngay</strong>, và tạo hai mối đe dọa cùng lúc (ví dụ hai chuỗi 3 mở) để đối thủ không chặn kịp.</div>
+            <h3>Cách chơi trong trang Caro</h3>
+            <ul>
+                <li><strong>Chơi tay</strong>: chọn “👤 Người chơi” cho Xanh và một bot cho Đỏ, rồi bấm vào ô trống.</li>
+                <li><strong>Bot đấu bot</strong>: chọn bot cho cả hai bên rồi ▶ Bắt đầu để xem từng nước; hoặc bấm <strong>📊 Bot đấu bot</strong> để chạy 10–100 ván liền (đổi màu mỗi ván) và xem tỉ lệ thắng.</li>
+                <li><strong>Code của tôi</strong>: tab “Code Xanh”/“Code Đỏ”, chọn ngôn ngữ, “⤵ Nạp mẫu” một chiến thuật rồi sửa. JavaScript chạy ngay trong trình duyệt; Python và C++ được máy chủ chạy.</li>
+                <li><strong>Đấu online</strong>: “🌐 Đấu online” → tạo phòng (bạn là Xanh) và gửi mã cho bạn, hoặc nhập mã để vào. Mỗi người nộp code của mình, máy chủ chạy trận và phát trực tiếp.</li>
+            </ul>
+            <p><a class="btn btn-primary" href="caro.html">▶ Vào chơi Cờ Caro</a></p>
+        </section>
+
+        <section class="card" id="bot">
+            <h2>🤖 Viết bot</h2>
+            <h3>JavaScript</h3>
+            <pre><code>function getNextMove(state, helpers, log) {
+    log('Tôi có', state.legalMoves.length, 'nước đi hợp lệ');   // hiện ở tab Console
+    return state.legalMoves[0];                                  // trả về một phần tử của legalMoves
+}</code></pre>
+            <h3>Python / C++</h3>
+            <p>Chương trình đọc <strong>một chuỗi JSON</strong> (chính là <code>state</code>) từ <code>stdin</code>, in <strong>một dòng JSON</strong> nước đi ra <code>stdout</code>. Muốn ghi log thì in ra <code>stderr</code>.</p>
+            <pre><code>import json, sys
+state = json.loads(sys.stdin.read())
+move = state["legalMoves"][0]
+sys.stderr.write("log: chọn %s\n" % move["to"])
+print(json.dumps({"to": move["to"]}))            # Oẳn tù tì: {"from": ..., "to": ...}</code></pre>
+
+            <h3>Dữ liệu bot nhận được (<code>state</code>)</h3>
+            <table>
+                <thead><tr><th>Trường</th><th>Oẳn tù tì</th><th>Cờ Caro</th></tr></thead>
+                <tbody>
+                    <tr><td><code>myPlayer</code> / <code>opponentPlayer</code></td><td colspan="2">1 = Xanh (đi trước), 2 = Đỏ</td></tr>
+                    <tr><td><code>board</code></td><td>mảng 9×9, ô là <code>{player, type}</code> hoặc <code>null</code></td><td>mảng N×N, ô là <code>{player, type:'stone'}</code> hoặc <code>null</code></td></tr>
+                    <tr><td><code>grid</code></td><td>—</td><td>mảng chuỗi, mỗi ký tự: <code>0</code> trống, <code>1</code> Xanh, <code>2</code> Đỏ (dễ đọc nhất cho C++)</td></tr>
+                    <tr><td><code>legalMoves</code></td><td><code>{from, to, pieceType, capture, notation}</code></td><td><code>{to}</code> — mọi ô trống</td></tr>
+                    <tr><td>Mục tiêu</td><td><code>myGoal</code>, <code>opponentGoal</code> = <code>{r, c}</code></td><td><code>winLength</code> (số quân liên tiếp để thắng)</td></tr>
+                    <tr><td>Khác</td><td><code>myCounts</code>, <code>opponentCounts</code>, <code>moveHistory</code>, <code>turnNumber</code>, <code>rules</code></td><td><code>moveHistory</code>, <code>turnNumber</code>, <code>rules</code></td></tr>
+                    <tr><td>Kết quả trả về</td><td><code>{ from: {r,c}, to: {r,c} }</code></td><td><code>{ to: {r,c} }</code></td></tr>
+                </tbody>
+            </table>
+            <p>Tọa độ: <code>r</code> là hàng tính từ trên xuống (0 = hàng trên cùng), <code>c</code> là cột từ trái sang (0 = cột A).</p>
+
+            <h3>Hàm hỗ trợ (<code>helpers</code>, chỉ JavaScript)</h3>
+            <ul>
+                <li><code>getLegalMoves(player, board)</code>, <code>simulateMove(board, move, player)</code> → bàn cờ mới (để nhìn trước), <code>checkWin(board)</code> → <code>{winner: 1|2|'draw'|null}</code></li>
+                <li><code>distance(r1,c1,r2,c2)</code> (số bước kiểu Vua), <code>randomChoice(arr)</code>, <code>toNotation(r,c)</code>, <code>fromNotation('B5')</code></li>
+                <li>Oẳn tù tì thêm: <code>canCapture(a, b)</code>, <code>getPieceCounts(player, board)</code>, <code>getPieces(player, board)</code></li>
+            </ul>
+            <h3>Giới hạn</h3>
+            <ul>
+                <li>Mỗi nước tối đa <strong>2,5 giây</strong> trên máy chủ (trình duyệt: 3 giây). Giải đấu có thể đặt thêm tổng thời gian cho cả ván.</li>
+                <li>Code tối đa 100 KB. Bot chạy trong môi trường cách ly: không đọc được file, mạng hay dữ liệu của máy chủ.</li>
+                <li>Bot không nhớ gì giữa hai nước (mỗi nước chạy lại từ đầu): hãy suy ra mọi thứ từ <code>state</code> và <code>moveHistory</code>.</li>
+            </ul>
+        </section>
+
+        <section class="card" id="strategies">
+            <h2>🧠 Chiến thuật mẫu</h2>
+            <p>Mỗi chiến thuật là một file code hoàn chỉnh, đọc kèm chú thích tiếng Việt. Cách học nhanh nhất: nạp hai mẫu, cho đấu với nhau bằng “Bot đấu bot”, rồi sửa một chỗ và xem tỉ lệ thắng thay đổi thế nào.</p>
+            <h3>Cờ Caro</h3>
+            <table>
+                <thead><tr><th>Bot</th><th>Ý tưởng</th><th>Độ mạnh</th><th>Code mẫu</th></tr></thead>
+                <tbody id="caro-strats"></tbody>
+            </table>
+            <p class="small muted">Ba bot Tấn công / Phòng thủ / Cân bằng dùng chung một hàm chấm điểm, chỉ khác hai hệ số <code>ATTACK</code> và <code>DEFEND</code> — ví dụ rõ nhất cho việc “chỉnh tham số là có tính cách khác”. Minimax nhìn trước 3 nước với cắt tỉa alpha-beta.</p>
+            <h3>Oẳn tù tì</h3>
+            <table>
+                <thead><tr><th>Bot</th><th>Ý tưởng</th></tr></thead>
+                <tbody>
+                    <tr><td>🎲 Random</td><td>Chọn ngẫu nhiên một nước hợp lệ.</td></tr>
+                    <tr><td>🚀 Goal Rusher</td><td>Luôn chọn nước đưa quân gần ô đích nhất.</td></tr>
+                    <tr><td>⚔️ Aggressive Hunter</td><td>Ưu tiên ăn quân, săn loại quân đối thủ sắp hết.</td></tr>
+                    <tr><td>🧠 Tactical AI</td><td>Chấm điểm nhiều tiêu chí: an toàn quân, phòng thủ ô đích, tiến công.</td></tr>
+                </tbody>
+            </table>
+            <p class="small muted">Có cho JavaScript, Python và C++ (mục “Mẫu Bot” trong trang Oẳn tù tì).</p>
+        </section>
+
+        <section class="card" id="online">
+            <h2>🌐 Online, xếp hạng và giải đấu</h2>
+            <ul>
+                <li><strong>Đấu online</strong>: cần đăng nhập. Người tạo phòng ngồi Xanh, người vào ngồi Đỏ, người thứ ba trở đi là khán giả. Trận chỉ bắt đầu khi <strong>cả hai</strong> đã nộp code và code biên dịch được.</li>
+                <li><strong>Elo</strong> (bảng xếp hạng) chỉ thay đổi ở trận <strong>Oẳn tù tì online giữa hai tài khoản khác nhau</strong>. Caro online được lưu lịch sử nhưng chưa tính Elo.</li>
+                <li><strong>Giải đấu</strong>: admin tạo giải (loại trực tiếp, vòng tròn hoặc chia bảng). Bạn đăng ký một bot; máy chủ chạy thử bot trước khi nhận. Nhánh đấu có đường nối: <span style="color:var(--green);font-weight:700">xanh lá</span> là người thắng đi tiếp, xanh dương nhấp nháy là cặp đang đấu.</li>
+                <li>Mọi trận (luyện tập có người chơi, online, giải đấu) đều <strong>xem lại được</strong> từng nước trong Lịch sử trận.</li>
+            </ul>
+        </section>
+
+        <section class="card" id="faq">
+            <h2>❓ Hỏi đáp</h2>
+            <h3>Bot của tôi toàn đi ngẫu nhiên?</h3>
+            <p>Xem tab Console: dòng ⚠️ cho biết lý do (lỗi cú pháp, thiếu hàm <code>getNextMove</code>, trả về nước không có trong <code>legalMoves</code>, hoặc quá thời gian).</p>
+            <h3>Python/C++ báo không chạy được?</h3>
+            <p>Máy chủ cần có <code>python3</code> / <code>g++</code>. Nếu admin tắt chế độ chạy code Python/C++ khi luyện tập, bạn vẫn dùng được chúng trong online và giải đấu.</p>
+            <h3>Tôi là admin, đăng nhập thế nào?</h3>
+            <p>Cũng ở trang đăng nhập: nhập tài khoản admin và mật khẩu, sau đó nhập thêm <strong>khóa admin</strong>. Phiên admin tự hết hạn sau vài giờ.</p>
+        </section>
+    </main>
+    <script src="bot_templates.js"></script>
+    <script src="caro_strategies.js"></script>
+    <script>
+        (function () {
+            var S = window.CARO_STRATEGIES || {};
+            var langs = { javascript: 'JS', python: 'Python', cpp: 'C++' };
+            document.getElementById('caro-strats').innerHTML = Object.keys(S).map(function (id) {
+                var s = S[id];
+                return '<tr><td><strong>' + s.name + '</strong></td><td>' + s.idea + '</td><td>' + '★'.repeat(s.level) + '<span class="muted">' + '★'.repeat(5 - s.level) + '</span></td><td>'
+                    + Object.keys(langs).filter(function (l) { return s.code[l]; }).map(function (l) { return langs[l]; }).join(', ') + '</td></tr>';
+            }).join('');
+        })();
+    </script>
+</body>
+
+</html>

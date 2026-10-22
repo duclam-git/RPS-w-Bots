@@ -242,6 +242,7 @@ function notifyUpdated(tid) {
 
 /** In-flight games (so spectators who join mid-game can catch up). liveId -> state */
 const liveGames = new Map();
+function liveGameCount() { return liveGames.size; }
 function liveForTournament(tid) {
     return [...liveGames.values()].filter(g => g.tournamentId === tid).map(g => ({
         liveId: g.liveId, seriesId: g.seriesId, gameNo: g.gameNo,
@@ -1017,5 +1018,5 @@ module.exports = {
     // manager
     setIO, HttpError, createTournament, updateTournament, resetSeries, setSeriesResult, registerEntry, updateEntry, removeEntry, startTournament,
     run, pause, shutdown, deleteTournament, recoverOnBoot, listTournaments, getTournamentDetail,
-    liveForTournament
+    liveForTournament, liveGameCount
 };

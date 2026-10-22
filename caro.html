@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTTv2 — Cờ Caro</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="arena.css">
+    <link rel="stylesheet" href="portal.css">
+    <script>if (localStorage.getItem('ott_theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');</script>
+
+    <!-- Ace Code Editor: served by our own server first (works offline / on a LAN), CDN as fallback -->
+    <script src="vendor/ace/ace.js"></script>
+    <script>
+        (function () {
+            var local = !!window.ace;
+            var base = local ? 'vendor/ace/' : 'https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/';
+            var ext = local ? '.js' : '.min.js';
+            var files = ['theme-monokai', 'mode-javascript', 'mode-python', 'mode-c_cpp'];
+            if (!local) files.unshift('ace');
+            files.forEach(function (n) { document.write('<script src="' + base + n + ext + '"><\/script>'); });
+            window.__aceBase = base;
+        })();
+    </script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>window.io || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"><\/script>')</script>
+</head>
+
+<body>
+    <header class="hub-header">
+        <a class="hub-logo" href="home.html" title="Về trang người chơi">⚔️ <span>OTTv2 CODE ARENA</span></a>
+        <nav class="hub-nav">
+            <a href="home.html">🏠 Chọn trò chơi</a>
+            <a href="caro.html" class="active">⚫ Cờ Caro</a>
+            <a href="arena.html#/tournaments">🏆 Giải đấu</a>
+            <a href="arena.html#/matches">📜 Lịch sử</a>
+            <a href="guide.html#caro">📘 Luật chơi</a>
+        </nav>
+        <div class="hub-tools">
+            <a class="btn btn-ghost" id="me-chip" href="home.html">👤 …</a>
+            <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện sáng/tối">🌙</button>
+        </div>
+    </header>
+
+    <main class="caro-main">
+        <section class="caro-left">
+            <div class="card caro-controls">
+                <div class="caro-sides">
+                    <label class="side blue">🔵 Xanh (đi trước)
+                        <select id="ctrl-blue"></select>
+                    </label>
+                    <span class="vs">VS</span>
+                    <label class="side red">🔴 Đỏ
+                        <select id="ctrl-red"></select>
+                    </label>
+                </div>
+                <div class="row caro-toolbar">
+                    <label class="inline">Bàn
+                        <select id="board-size">
+                            <option value="3">3×3 (3 quân thắng)</option>
+                            <option value="9">9×9</option>
+                            <option value="13">13×13</option>
+                            <option value="15" selected>15×15</option>
+                            <option value="19">19×19</option>
+                        </select>
+                    </label>
+                    <label class="inline">Tốc độ
+                        <select id="speed">
+                            <option value="900">Chậm</option>
+                            <option value="350" selected>Vừa</option>
+                            <option value="80">Nhanh</option>
+                            <option value="0">Tức thì</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="row caro-toolbar">
+                    <button class="btn btn-primary" id="btn-start">▶ Bắt đầu</button>
+                    <button class="btn" id="btn-step" title="Đi một nước">⏭ 1 nước</button>
+                    <button class="btn" id="btn-reset">🔄 Ván mới</button>
+                    <button class="btn btn-gold" id="btn-sim" title="Cho hai bot đấu nhiều ván liên tiếp">📊 Bot đấu bot</button>
+                    <button class="btn" id="btn-online">🌐 Đấu online</button>
+                </div>
+            </div>
+
+            <!-- online room bar (shown while in a room) -->
+            <div class="card online-bar" id="online-bar" hidden>
+                <div class="row between">
+                    <div><strong>🌐 Phòng <span class="mono" id="ob-code">OTT-XXXX</span></strong>
+                        <button class="btn btn-sm" id="ob-copy">📋 Chép mã</button>
+                        <span class="small muted" id="ob-rules"></span></div>
+                    <button class="btn btn-sm btn-danger" id="ob-leave">✖ Rời phòng</button>
+                </div>
+                <div class="row small" style="margin-top:.4rem">
+                    <span class="seat blue" id="ob-blue">🔵 Đang chờ…</span>
+                    <span class="seat red" id="ob-red">🔴 Đang chờ…</span>
+                    <span class="muted">Bạn: <strong id="ob-me">—</strong></span>
+                </div>
+                <div class="small" id="ob-status" style="margin:.4rem 0">Viết code ở tab của bạn rồi bấm “Nộp code”.</div>
+                <div class="row">
+                    <button class="btn btn-primary" id="ob-submit">📤 Nộp code</button>
+                    <button class="btn" id="ob-rematch" hidden>🔁 Ván mới</button>
+                </div>
+            </div>
+
+            <div class="card caro-status">
+                <div class="row between">
+                    <div><span class="turn-dot" id="turn-dot"></span> <strong id="turn-text">Sẵn sàng</strong></div>
+                    <span class="small muted" id="ply-text">0 nước</span>
+                </div>
+                <div class="result-banner" id="result" hidden></div>
+            </div>
+
+            <div class="caro-board-wrap card">
+                <div class="caro-board" id="board" role="grid" aria-label="Bàn cờ Caro"></div>
+            </div>
+        </section>
+
+        <section class="card caro-studio">
+            <div class="tabs caro-tabs" role="tablist">
+                <button class="btn active" data-tab="code-1">🔵 Code Xanh</button>
+                <button class="btn" data-tab="code-2">🔴 Code Đỏ</button>
+                <button class="btn" data-tab="console">📟 Console <span class="badge" id="log-count">0</span></button>
+                <button class="btn" data-tab="moves">📜 Nước đi</button>
+                <button class="btn" data-tab="help">📘 Luật &amp; API</button>
+            </div>
+
+            <div class="tab-pane active" data-pane="code-1">
+                <div class="row editor-bar">
+                    <select id="lang-1" class="lang-select"><option value="javascript">JavaScript</option><option value="python">Python</option><option value="cpp">C++</option></select>
+                    <select id="tpl-1"></select>
+                    <button class="btn btn-sm" data-act="load-tpl" data-side="1">⤵ Nạp mẫu</button>
+                    <button class="btn btn-sm" data-act="export" data-side="1">⬇ Xuất file</button>
+                </div>
+                <div class="editor" id="editor-1"></div>
+                <p class="small muted">Chọn “🧑‍💻 Code của tôi” cho bên Xanh để chạy code này. Code được tự lưu trong trình duyệt.</p>
+            </div>
+            <div class="tab-pane" data-pane="code-2">
+                <div class="row editor-bar">
+                    <select id="lang-2" class="lang-select"><option value="javascript">JavaScript</option><option value="python">Python</option><option value="cpp">C++</option></select>
+                    <select id="tpl-2"></select>
+                    <button class="btn btn-sm" data-act="load-tpl" data-side="2">⤵ Nạp mẫu</button>
+                    <button class="btn btn-sm" data-act="export" data-side="2">⬇ Xuất file</button>
+                </div>
+                <div class="editor" id="editor-2"></div>
+                <p class="small muted">Chọn “🧑‍💻 Code của tôi” cho bên Đỏ để chạy code này.</p>
+            </div>
+            <div class="tab-pane" data-pane="console">
+                <div class="row between"><span class="small muted">log(...) của bot hiện ở đây, kèm thời gian suy nghĩ mỗi nước.</span><button class="btn btn-sm" id="clear-log">🧹 Xóa</button></div>
+                <div class="console" id="console"></div>
+            </div>
+            <div class="tab-pane" data-pane="moves">
+                <ol class="move-list" id="moves"></ol>
+            </div>
+            <div class="tab-pane caro-help" data-pane="help">
+                <h3>Luật chơi</h3>
+                <ul>
+                    <li>Hai bên lần lượt đặt một quân lên ô trống. <strong>Xanh đi trước.</strong></li>
+                    <li>Ai có đủ <strong>5 quân liên tiếp</strong> (bàn 3×3: 3 quân) theo hàng ngang, dọc hoặc chéo trước thì thắng. Chuỗi dài hơn 5 cũng tính.</li>
+                    <li>Bàn kín mà chưa ai thắng là <strong>hòa</strong>.</li>
+                    <li>Chơi tay: chọn “👤 Người chơi” cho một bên rồi bấm vào ô trống khi đến lượt.</li>
+                </ul>
+                <h3>Viết bot</h3>
+                <pre><code>function getNextMove(state, helpers, log) {
+  // state.grid      : ["000..", ...]  '0' trống, '1' Xanh, '2' Đỏ
+  // state.myPlayer  : 1 (Xanh) hoặc 2 (Đỏ)
+  // state.winLength : số quân liên tiếp để thắng
+  // state.legalMoves: [{ to: { r, c } }, ...]  mọi ô trống
+  return state.legalMoves[0];   // trả về { to: { r, c } }
+}</code></pre>
+                <p class="small"><code>helpers</code>: <code>getLegalMoves(player, board)</code>, <code>simulateMove(board, move, player)</code>, <code>checkWin(board)</code>, <code>randomChoice(arr)</code>, <code>distance(r1,c1,r2,c2)</code>, <code>toNotation(r,c)</code>.
+                Python / C++: đọc JSON <code>state</code> từ stdin, in <code>{"to":{"r":R,"c":C}}</code> ra stdout, log ra stderr.</p>
+                <p class="small">Mỗi nước có tối đa <strong>2,5 giây</strong> (trong trình duyệt: 3 giây). Bot lỗi, quá giờ hoặc đi sai luật sẽ bị thay bằng một nước ngẫu nhiên và báo ở Console.</p>
+                <p class="small"><a href="guide.html#caro">Hướng dẫn đầy đủ và giải thích từng chiến thuật mẫu →</a></p>
+            </div>
+        </section>
+    </main>
+
+    <!-- online dialog -->
+    <dialog id="online-dialog" class="auth-dialog">
+        <div class="row between"><h2>🌐 Đấu Caro online</h2><button class="btn btn-ghost btn-sm" id="od-close" aria-label="Đóng">✖</button></div>
+        <p class="small muted">Hai người chơi ở hai máy cùng nộp code bot; máy chủ chạy trận và phát trực tiếp cho cả phòng. Trận được lưu vào lịch sử (Caro chưa tính Elo).</p>
+        <h3>Tạo phòng mới</h3>
+        <p class="small">Bàn hiện tại: <strong id="od-size">15×15</strong> (đổi ở mục “Bàn” trước khi tạo). Bạn ngồi bên Xanh.</p>
+        <button class="btn btn-primary" id="od-create">⚡ Tạo phòng</button>
+        <h3 style="margin-top:1rem">Vào phòng bằng mã</h3>
+        <div class="row"><input id="od-code" placeholder="OTT-XXXX" maxlength="12" style="flex:1"><button class="btn" id="od-join">Vào phòng</button></div>
+        <div class="auth-msg" id="od-msg"></div>
+    </dialog>
+
+    <!-- bot-vs-bot dialog -->
+    <dialog id="sim-dialog" class="auth-dialog">
+        <div class="row between"><h2>📊 Bot đấu bot</h2><button class="btn btn-ghost btn-sm" id="sd-close" aria-label="Đóng">✖</button></div>
+        <p class="small muted">Chạy nhiều ván liên tiếp giữa hai bot (JavaScript) ngay trong trình duyệt, <strong>đổi màu mỗi ván</strong> để công bằng vì Xanh đi trước có lợi.</p>
+        <div class="form-grid">
+            <label>Bot A<select id="sd-a"></select></label>
+            <label>Bot B<select id="sd-b"></select></label>
+            <label>Số ván<select id="sd-n"><option>10</option><option selected>20</option><option>50</option><option>100</option></select></label>
+        </div>
+        <button class="btn btn-gold" id="sd-run">▶ Chạy</button>
+        <div class="sim-bar"><div id="sd-bar"></div></div>
+        <div id="sd-out" class="small"></div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status"></div>
+
+    <script>var module = { exports: {} };</script>
+    <script src="games/caro.js"></script>
+    <script>window.CaroEngine = module.exports;</script>
+    <script src="bot_templates.js"></script>
+    <script src="caro_strategies.js"></script>
+    <script src="bot_client.js"></script>
+    <script src="caro_page.js"></script>
+</body>
+
+</html>

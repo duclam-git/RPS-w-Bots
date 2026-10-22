@@ -25,7 +25,7 @@ async function boot(env = {}, dbFile) {
     const db = dbFile || path.join(os.tmpdir(), `ott-net-${process.pid}-${port}.db`);
     const proc = spawn(process.execPath, ['server.js'], {
         cwd: ROOT,
-        env: { ...process.env, PORT: String(port), DB_PATH: db, ADMIN_KEY: 'net-key', LEADERBOARD_PATH: path.join(os.tmpdir(), `ott-net-${process.pid}-${port}-lb.json`), BACKUP_INTERVAL_HOURS: '0', ...env },
+        env: { ...process.env, PORT: String(port), DB_PATH: db, ADMIN_KEY: 'net-key', ADMIN_KEY_HEADER: '1', ALLOW_GUEST_ROOMS: '1', LEADERBOARD_PATH: path.join(os.tmpdir(), `ott-net-${process.pid}-${port}-lb.json`), BACKUP_INTERVAL_HOURS: '0', ...env },
         stdio: ['ignore', 'pipe', 'pipe']
     });
     const srv = { port, base: `http://127.0.0.1:${port}`, proc, db, out: '', err: '', exited: null };
@@ -283,4 +283,78 @@ test('SIGTERM shuts down cleanly (exit 0) and an auto-running tournament resumes
     again.proc.kill('SIGTERM');
     for (let i = 0; i < 100 && again.exited === null; i++) await sleep(100);
     assert.strictEqual(again.exited, 0);
+});
+
+// ------------------------------------------------------------------------------------------------
+test('online needs an account; a session that ends (logout / password reset) also closes its sockets', async () => {
+    const srv = await boot({ ALLOW_GUEST_ROOMS: '0', DISABLE_RATE_LIMIT: '1' });
+    const guest = await connect(srv);
+    const refused = once(guest, 'join_error');
+    guest.emit('create_room', { playerName: 'anon', game: 'rps' });
+    assert.match(await refused, /đăng nhập/);
+    guest.close();
+
+    const register = async (username) => {
+        const r = await fetch(srv.base + '/api/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password: 'password-123' }) });
+        assert.strictEqual(r.status, 201);
+        return r.headers.getSetCookie()[0].split(';')[0];
+    };
+    const cookieA = await register('net_alice');
+    const a = await connect(srv, { extraHeaders: { cookie: cookieA } });
+    const created = once(a, 'room_created');
+    a.emit('create_room', { game: 'caro', rules: { size: 9, winLength: 5 } });
+    const room = await created;
+    assert.strictEqual(room.roomState.game, 'caro');
+    assert.deepStrictEqual(room.roomState.rules, { size: 9, winLength: 5 });
+
+    // another tab of the same account logs out -> this socket is told and dropped
+    const revoked = once(a, 'session_revoked');
+    const gone = once(a, 'disconnect');
+    await fetch(srv.base + '/api/auth/logout', { method: 'POST', headers: { cookie: cookieA } });
+    await revoked; await gone;
+
+    // logout of ANOTHER session of the same user does not touch this one
+    const login = async () => (await fetch(srv.base + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'net_alice', password: 'password-123' }) })).headers.getSetCookie()[0].split(';')[0];
+    const c1 = await login(), c2 = await login();
+    const s1 = await connect(srv, { extraHeaders: { cookie: c1 } });
+    let dropped = false;
+    s1.on('session_revoked', () => { dropped = true; });
+    await fetch(srv.base + '/api/auth/logout', { method: 'POST', headers: { cookie: c2 } });
+    await sleep(300);
+    assert.strictEqual(dropped, false);
+    assert.ok(s1.connected);
+    s1.close();
+});
+
+test('caro online room: bots of the room game, saved as caro, never rated; an rps page cannot sit in it', async () => {
+    const srv = await boot({ DISABLE_RATE_LIMIT: '1' });
+    global.window = {};
+    require('../bot_templates.js');
+    require('../caro_strategies.js');
+    const S = global.window.CARO_STRATEGIES;
+    const a = await connect(srv), b = await connect(srv);
+    const created = once(a, 'room_created');
+    a.emit('create_room', { game: 'caro', rules: { size: 7, winLength: 4 } });
+    const { roomCode } = await created;
+    const wrong = once(b, 'join_error');
+    b.emit('join_room', { roomCode, game: 'rps' });
+    assert.match(await wrong, /Caro/);
+    const joined = once(b, 'room_joined');
+    b.emit('join_room', { roomCode, game: 'caro' });
+    await joined;
+    const started = once(a, 'match_started', 20000);
+    const finished = once(a, 'online_match_finished', 60000);
+    a.emit('player_ready', { code: S.minimax.code.javascript, lang: 'javascript' });
+    b.emit('player_ready', { code: S.random.code.javascript, lang: 'javascript' });
+    const st = await started;
+    assert.strictEqual(st.game, 'caro');
+    assert.strictEqual(st.board.length, 7);
+    const res = await finished;
+    assert.strictEqual(res.rated, false);
+    assert.strictEqual(res.eloOutcome, null);
+    const m = await (await fetch(`${srv.base}/api/matches/${res.matchId}`)).json();
+    assert.strictEqual(m.game, 'caro');
+    assert.strictEqual(m.rules.rows, 7);
+    assert.ok(m.moves.every(x => !x.fallback), 'strategy bots never needed a fallback move');
+    a.close(); b.close();
 });
