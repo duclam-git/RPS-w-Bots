@@ -787,7 +787,8 @@
     // ===== Match history (local practice games) =====
     function describeController(side) {
         const type = controllers[side];
-        const profile = currentPlayerProfile && currentPlayerProfile.name;
+        // the logged-in account name first, so the game reads the same as in "my matches"
+        const profile = (accountUser && accountUser.username) || (currentPlayerProfile && currentPlayerProfile.name);
         const lang = side === 'blue' ? blueLang : redLang;
         const names = { random: 'Random AI', rusher: 'Goal Rusher AI', hunter: 'Aggressive Hunter AI', tactical: 'Tactical AI' };
         if (type === 'custom') return { name: `${profile || 'Code Bot'} (${lang})`, lang };
@@ -800,10 +801,13 @@
         const payload = {
             blue: describeController('blue'),
             red: describeController('red'),
+            // the sides the player controlled (by hand or with their own code): links the game to the account
+            mine: ['blue', 'red'].filter(side => ['human', 'custom'].includes(controllers[side])),
             moves: moveHistory.map(m => ({ player: m.player, from: m.fromCoords, to: m.toCoords }))
         };
         fetch('/api/matches/local', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         })
@@ -1425,30 +1429,11 @@
 
     // ===== Theme Management (Dark Mode) =====
 
+    // Theme picker shared by every page (theme.js): light, dark and colour palettes
     function initTheme() {
-        const saved = localStorage.getItem('ott_theme') || 
-            (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-        setTheme(saved);
-    }
-
-    function setTheme(theme) {
-        currentTheme = theme;
-        localStorage.setItem('ott_theme', theme);
-        const root = document.documentElement;
-        const btn = document.getElementById('theme-toggle-btn');
-        if (theme === 'dark') {
-            root.setAttribute('data-theme', 'dark');
-            if (btn) btn.innerHTML = '☀️ Ban ngày';
-        } else {
-            root.removeAttribute('data-theme');
-            if (btn) btn.innerHTML = '🌙 Ban đêm';
-        }
-        if (editorBlue) editorBlue.setTheme('ace/theme/monokai');
-        if (editorRed) editorRed.setTheme('ace/theme/monokai');
-    }
-
-    function toggleTheme() {
-        setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+        window.OTTTheme.attach(document.getElementById('theme-toggle-btn'));
+        currentTheme = window.OTTTheme.current().base;
+        document.addEventListener('ott-themechange', (e) => { currentTheme = e.detail.base; });
     }
 
     // ===== Player Profile & Leaderboard =====
@@ -2073,14 +2058,16 @@
         if (soundBtn) {
             soundBtn.addEventListener('click', () => {
                 soundEnabled = !soundEnabled;
-                soundBtn.textContent = soundEnabled ? '🔊 Âm thanh' : '🔇 Tắt tiếng';
+                showSound();
                 localStorage.setItem('ott_sound_enabled', soundEnabled ? '1' : '0');
             });
-            const savedSound = localStorage.getItem('ott_sound_enabled');
-            if (savedSound === '0') {
-                soundEnabled = false;
-                soundBtn.textContent = '🔇 Tắt tiếng';
-            }
+            // icon-only, like the sound button on the other pages
+            const showSound = () => {
+                soundBtn.textContent = soundEnabled ? '🔊' : '🔇';
+                soundBtn.title = soundEnabled ? 'Tắt âm thanh' : 'Bật âm thanh';
+            };
+            if (localStorage.getItem('ott_sound_enabled') === '0') soundEnabled = false;
+            showSound();
         }
 
         // Controller Selectors
@@ -2203,9 +2190,6 @@
             });
         }
 
-        // Theme Toggle Button
-        const themeBtn = document.getElementById('theme-toggle-btn');
-        if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
 
         // Profile Modal Listeners
         const profileBtn = document.getElementById('profile-open-btn');

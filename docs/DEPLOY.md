@@ -4,7 +4,7 @@
 
 ```bash
 npm install
-cp .env.example .env        # sửa ADMIN_PASSWORD, ADMIN_KEY; server tự đọc .env (biến môi trường thật luôn thắng)
+cp .env.example .env        # sửa ADMIN_PASSWORD (và ADMIN_KEY nếu dùng khóa cố định); server tự đọc .env (biến môi trường thật luôn thắng)
 npm start                   # http://<IP máy>:3000 — trang đăng nhập; cho học sinh vào bằng IP đó
 ```
 `sudo apt install bubblewrap` nếu là Linux (cách ly bot, xem `SECURITY.md`). Windows/macOS chạy được, chỉ có tầng bảo vệ cơ bản.
@@ -20,7 +20,8 @@ Internet ──HTTPS──> nginx/Caddy ──http://127.0.0.1:3000──> node 
 `.env` tối thiểu:
 ```
 ADMIN_PASSWORD=<mật khẩu admin dài>
-ADMIN_KEY=<chuỗi ngẫu nhiên dài, khác mật khẩu>   # bước 2 của đăng nhập admin
+ADMIN_KEY_MODE=console     # bước 2 của đăng nhập admin: mã 1 lần in ra console (cần xem được log server)
+# ADMIN_KEY=<chuỗi ngẫu nhiên dài>   # hoặc khóa cố định (static) nếu admin không xem được log
 TRUST_PROXY=1               # BẮT BUỘC sau proxy: để giới hạn tần suất thấy IP thật (xem §4)
 COOKIE_SECURE=1             # cookie Secure + HSTS
 SANDBOX_STRICT=1            # từ chối ngôn ngữ không được cách ly mạnh
@@ -50,6 +51,10 @@ Docker + bubblewrap: bubblewrap cần user namespace mà seccomp/AppArmor mặc 
 | `MAX_ROOMS` | 200 | số phòng online tối đa |
 | `MAX_BOT_PROCS` | số CPU (≥2) | tiến trình bot đồng thời cho **toàn máy chủ** (phòng online + giải + luyện tập) |
 | `MAX_COMPILES` | 2 | số `g++` chạy cùng lúc |
+| `WARM_BOTS` | `1` | `0` = mỗi nước đi khởi động một tiến trình bot mới (như bản ≤ v6.5) |
+| `WARM_BOTS_MEM_MB` | 40% RAM máy | RAM dành cho các tiến trình bot đang được giữ lại (JS ~48MB, Python ~16MB mỗi tiến trình) |
+| `WARM_BOTS_IDLE_SEC` / `WARM_BOTS_MAX_MOVES` | 30 / 100 | tiến trình rảnh quá lâu thì dừng; phục vụ đủ số nước thì thay mới |
+| `SANDBOX_WARM_CPU_SEC` | 120 | hạn mức CPU của cả một tiến trình bot được giữ lại (mỗi nước đi vẫn bị `SANDBOX_CPU_SEC` chặn) |
 | `BACKUP_INTERVAL_HOURS` / `BACKUP_KEEP` / `BACKUP_DIR` | 24 / 14 / `data/backups` | sao lưu tự động |
 
 Giới hạn tự động (không cấu hình): 60 sự kiện socket dồn / 30 mỗi giây; tạo phòng 5/phút/socket; nộp code 8/phút/socket và 40/phút/IP; body JSON ≤ 2MB; code bot ≤ 100KB; một socket chỉ ở một phòng.

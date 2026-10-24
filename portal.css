@@ -94,7 +94,10 @@
     display: grid; grid-template-columns: repeat(var(--n), 1fr); width: var(--size); aspect-ratio: 1;
     background: #e9c46a; border: 3px solid #7c5a1a; border-radius: 6px; padding: 2px;
 }
-[data-theme="dark"] .caro-board { background: #8a6d2f; border-color: #3b2a0c; }
+/* dark: dark walnut board, light grid lines and a pale rim on the stones so both colours stand out */
+[data-theme="dark"] .caro-board { background: #3b2f1e; border-color: #120d06; }
+[data-theme="dark"] .caro-board .cell::before, [data-theme="dark"] .caro-board .cell::after { background: #d8bb8277; }
+[data-theme="dark"] .stone { box-shadow: 0 0 0 1.5px #f8fafcaa, 1px 2px 0 #000a; }
 .caro-board .cell {
     position: relative; border: none; background: transparent; padding: 0; margin: 0; cursor: default;
     display: grid; place-items: center; min-width: 0;

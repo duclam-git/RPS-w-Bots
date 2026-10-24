@@ -77,22 +77,13 @@
 
     $('#user-btn').addEventListener('click', () => { if (me) location.hash = `#/profile/${encodeURIComponent(me.username)}`; else openAuth('login'); });
     $('#logout-btn').addEventListener('click', async () => {
+        if (!(await window.OTTConfirmLogout())) return;
         try { await api('POST', '/api/auth/logout'); } catch (e) { }
         location.replace('/login.html');
     });
 
     // ---------- theme (shares the main page's key) ----------
-    function applyTheme(t) {
-        if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-        else document.documentElement.removeAttribute('data-theme');
-        $('#theme-btn').textContent = t === 'dark' ? '☀️' : '🌙';
-    }
-    applyTheme(localStorage.getItem('ott_theme') || 'light');
-    $('#theme-btn').addEventListener('click', () => {
-        const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-        localStorage.setItem('ott_theme', next);
-        applyTheme(next);
-    });
+    OTTTheme.attach($('#theme-btn'));      // theme picker (theme.js, shared by every page)
 
     // ---------- realtime ----------
     const socket = typeof io === 'function' ? io() : null;
@@ -243,7 +234,11 @@
         const games = s.matches.map(m => `<a href="#/match/${m.id}" title="${esc(m.blueName)} vs ${esc(m.redName)}">V${m.gameNo}</a>`).join(' ');
         const status = s.status === 'done' && s.decidedBy && s.decidedBy !== 'score' ? `${SERIES_STATUS.done} (${DECIDED[s.decidedBy] || s.decidedBy})` : SERIES_STATUS[s.status];
         const winSide = decided ? (s.a && s.winnerEntry === s.a.id ? 'a' : 'b') : '';
-        return `<div class="sc ${s.status}" data-sid="${s.id}" data-round="${s.round}" data-slot="${s.slot}" data-win="${winSide}">${row('a', s.winsA)}${row('b', s.winsB)}
+        // the whole card opens the pairing: the live game while it runs, else its last game (V1 V2 … stay for the others)
+        const lastId = s.matches.length ? s.matches[s.matches.length - 1].id : '';
+        const open = s.status === 'running' || lastId;
+        const tip = s.status === 'running' ? 'Bấm để xem trực tiếp cặp đấu này' : lastId ? 'Bấm để xem lại ván cuối' : '';
+        return `<div class="sc ${s.status}${open ? ' open' : ''}" data-sid="${s.id}" data-round="${s.round}" data-slot="${s.slot}" data-win="${winSide}" data-last="${lastId}"${tip ? ` title="${tip}"` : ''}>${row('a', s.winsA)}${row('b', s.winsB)}
             <div class="sc-foot"><span>BO${s.bestOf} · ${status}</span>${s.draws ? `<span>(${s.draws} hòa)</span>` : ''}${games}</div>${seriesAdminHTML(s)}</div>`;
     }
 
@@ -483,19 +478,75 @@
         }
 
         // ---- live games ----
+        // A big tournament runs many games at once: every board on screen is unreadable. Up to 4 games show as
+        // small boards; more show as a searchable list. Clicking one (or a running pairing in the bracket)
+        // watches THAT pairing on a large board, and keeps following it into its next game.
+        let watchSeries = null;      // series id being watched
+        let liveQuery = '';
+        const liveGoals = () => (data.tournament.rules.blueGoal ? { blue: data.tournament.rules.blueGoal, red: data.tournament.rules.redGoal } : null);
+        const liveTitle = (g) => `<span class="player-tag blue">${esc(g.blue.name)}</span> vs <span class="player-tag red">${esc(g.red.name)}</span>`;
+        const liveInfo = (g) => `Ván ${g.gameNo} · nước ${g.ply}${g.ended ? ' · ' + esc(g.ended) : ''}`;
         function drawLive() {
-            if (!live.size) { liveEl.innerHTML = ''; return; }
-            liveEl.innerHTML = `<div class="card"><h2><span class="live-dot"></span>Đang thi đấu trực tiếp</h2><div class="live-grid">
-                ${[...live.values()].map(g => `<div class="live-card">
-                    <div class="vs-title"><span class="player-tag blue">${esc(g.blue.name)}</span> vs <span class="player-tag red">${esc(g.red.name)}</span></div>
-                    <div class="muted small" style="margin:.2rem 0">Ván ${g.gameNo} · nước ${g.ply}${g.ended ? ' · ' + g.ended : ''}</div>
-                    ${boardHTML(g.board, { size: 'sm', last: g.last, goals: data.tournament.rules.blueGoal ? { blue: data.tournament.rules.blueGoal, red: data.tournament.rules.redGoal } : null })}</div>`).join('')}</div></div>`;
+            const games = [...live.values()];
+            const watched = watchSeries != null ? games.find(g => g.seriesId === watchSeries) : null;
+            const watchedSeries = watchSeries != null && data ? data.series.find(x => x.id === watchSeries) : null;
+            if (!games.length && !watchedSeries) { liveEl.innerHTML = ''; return; }
+            if (!$('#live-body', liveEl)) {      // the shell (and the search box being typed in) survives every move
+                liveEl.innerHTML = `<div class="card"><div class="row between" style="margin-bottom:.6rem">
+                    <h2><span class="live-dot"></span>Đang thi đấu trực tiếp <span class="muted small" id="live-count"></span></h2>
+                    <input id="live-q" type="search" placeholder="🔍 Tìm theo tên bot…" style="max-width:240px" value="${esc(liveQuery)}"></div>
+                    <div id="live-body"></div></div>`;
+                $('#live-q', liveEl).addEventListener('input', (e) => { liveQuery = e.target.value.trim().toLowerCase(); drawLive(); });
+            }
+            $('#live-count', liveEl).textContent = `(${games.length} ván)`;
+            $('#live-q', liveEl).style.display = games.length > 4 ? '' : 'none';
+            const shown = games.filter(g => !liveQuery || `${g.blue.name} ${g.red.name}`.toLowerCase().includes(liveQuery));
+            let html = '';
+            if (watchSeries != null) {
+                const lastId = watchedSeries && watchedSeries.matches.length ? watchedSeries.matches[watchedSeries.matches.length - 1].id : null;
+                html += `<div class="live-focus">
+                    <div class="row between"><div class="vs-title">${watched ? liveTitle(watched) : watchedSeries ? `${esc(watchedSeries.a ? watchedSeries.a.name : '?')} vs ${esc(watchedSeries.b ? watchedSeries.b.name : '?')}` : ''}</div>
+                    <button class="btn btn-sm" data-unwatch>✕ Xem tất cả</button></div>
+                    ${watched ? `<div class="muted small" style="margin:.3rem 0">${liveInfo(watched)}</div>${boardHTML(watched.board, { size: 'md', last: watched.last, goals: liveGoals() })}`
+                        : `<p class="muted" style="margin:.5rem 0">Cặp đấu này hiện không có ván nào đang chạy${watchedSeries && watchedSeries.status === 'done' ? ' (đã kết thúc)' : ''}.
+                           ${lastId ? `<a href="#/match/${lastId}">▶ Xem lại ván cuối</a>` : ''}</p>`}</div>`;
+            }
+            const others = shown.filter(g => g !== watched);
+            if (watchSeries == null && games.length <= 4) {
+                html += `<div class="live-grid">${others.map(g => `<div class="live-card open" data-watch="${g.seriesId}" title="Bấm để xem lớn">
+                    <div class="vs-title">${liveTitle(g)}</div><div class="muted small" style="margin:.2rem 0">${liveInfo(g)}</div>
+                    ${boardHTML(g.board, { size: 'sm', last: g.last, goals: liveGoals() })}</div>`).join('')}</div>`;
+            } else if (others.length) {
+                html += `<div class="live-list">${watchSeries != null ? '<div class="muted small">Các ván khác:</div>' : '<div class="muted small">Bấm vào một ván để xem trực tiếp:</div>'}
+                    ${others.map(g => `<button type="button" class="live-row" data-watch="${g.seriesId}"><span class="live-dot"></span>
+                    <span class="vs-title">${liveTitle(g)}</span><span class="muted small">${liveInfo(g)}</span></button>`).join('')}</div>`;
+            } else if (liveQuery && watchSeries == null) html += '<p class="muted small">Không có ván nào khớp.</p>';
+            $('#live-body', liveEl).innerHTML = html;
         }
+        const watchPairing = (sid) => {
+            watchSeries = sid;
+            drawLive();
+            liveEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+        liveEl.addEventListener('click', (e) => {
+            if (e.target.closest('[data-unwatch]')) { watchSeries = null; drawLive(); return; }
+            const w = e.target.closest('[data-watch]');
+            if (w) watchPairing(+w.dataset.watch);
+        });
+        // bracket: a click anywhere on a pairing card (not on its links / admin buttons) opens it
+        body.addEventListener('click', (e) => {
+            if (e.target.closest('a, button, select, input, [data-act]')) return;
+            const card = e.target.closest('.sc.open');
+            if (!card) return;
+            const sid = +card.dataset.sid;
+            if ([...live.values()].some(g => g.seriesId === sid)) watchPairing(sid);
+            else if (card.dataset.last) location.hash = `#/match/${card.dataset.last}`;
+        });
         const mkLive = (g) => {
             const board = cloneBoard(g.board);
             let last = null, ply = 0;
             (g.moves || []).forEach(m => { last = m; ply = m.ply; applyMoveTo(board, m); });
-            return { liveId: g.liveId, gameNo: g.gameNo, blue: g.blue, red: g.red, board, last, ply, ended: '' };
+            return { liveId: g.liveId, seriesId: g.seriesId, gameNo: g.gameNo, blue: g.blue, red: g.red, board, last, ply, ended: '' };
         };
 
         onSocket('live_snapshot', (p) => {
@@ -698,6 +749,11 @@
                 ${sb.notes.length ? `<div class="notice" style="margin-top:.8rem"><strong>Lưu ý</strong><ul style="margin:.3rem 0 0 1.1rem">${sb.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
                 <p class="small" style="margin-top:.8rem">⚙️ Tải hiện tại: <strong>${load.bots.active}/${load.bots.limit}</strong> tiến trình bot đang chạy, ${load.bots.queued} đang chờ (cao nhất từng thấy ${load.bots.maxActive}) ·
                     biên dịch C++: ${load.compiles.active}/${load.compiles.limit}, ${load.compiles.queued} đang chờ. Giới hạn chung cho TOÀN BỘ máy chủ (<code>MAX_BOT_PROCS</code>, <code>MAX_COMPILES</code>).</p>
+                <p class="small">♻️ Tiến trình bot dùng lại: ${load.warm.enabled
+                    ? `${load.warm.alive} đang sống (${load.warm.idle} rảnh) · ${load.warm.memMB}/${load.warm.memBudgetMB} MB ·
+                       ${load.warm.reused} nước dùng lại / ${load.warm.started} lần khởi động${load.warm.oneOff ? ` · ${load.warm.oneOff} nước phải khởi động riêng (hết ngân sách)` : ''}.
+                       Mỗi tiến trình JS/Python phục vụ nhiều nước đi nên đỡ tốn CPU (<code>WARM_BOTS_MEM_MB</code>).`
+                    : 'đã tắt (<code>WARM_BOTS=0</code>) — mỗi nước đi khởi động một tiến trình mới.'}</p>
                 <p class="small muted" style="margin-top:.4rem">Giới hạn mỗi nước: ${sb.limits.cpuSeconds}s CPU · ${sb.limits.memoryMB}MB RAM (Python/C++) · heap JS ${sb.limits.nodeHeapMB}MB.
                     Biến môi trường: <code>SANDBOX=auto|bwrap|builtin|off</code>, <code>SANDBOX_STRICT=1</code>, <code>SANDBOX_MEM_MB</code>, <code>SANDBOX_CPU_SEC</code>. Xem <code>docs/SECURITY.md</code>.</p>
             </div>`;
@@ -846,7 +902,7 @@
                 <p class="muted small">Bàn cờ trống; hai bên lần lượt đặt quân, Xanh đi trước. Xem trước bàn cờ:</p>`}
                 <div class="row" style="align-items:flex-start;gap:1.2rem">
                     <div id="ed-board"></div>
-                    <div style="flex:1;min-width:220px"><div id="ed-count" class="small" style="line-height:1.8"></div><div id="ed-issues" class="issues">…</div></div>
+                    <div style="flex:1;min-width:220px"><div id="ed-count" class="small" style="line-height:1.8"></div><div id="ed-issues" class="issues bad" hidden></div></div>
                 </div>
             </div>
             <div class="row"><button class="btn btn-primary" id="e-save">💾 ${isNew ? 'Tạo giải đấu' : 'Lưu thay đổi'}</button>
@@ -899,8 +955,9 @@
                     valid = out.ok;
                     const box = $('#ed-issues');
                     if (!box) return;
-                    box.className = 'issues' + (out.ok ? '' : ' bad');
-                    box.innerHTML = out.ok ? '✔ Luật hợp lệ' : `✖ Cần sửa:<ul>${out.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>`;
+                    // nothing is shown while the rules are fine: the box only appears to say what to fix
+                    box.hidden = out.ok;
+                    box.innerHTML = out.ok ? '' : `✖ Cần sửa:<ul>${out.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>`;
                     $('#e-save').disabled = !out.ok && !started;
                 } catch (e) { /* offline: server will validate on save */ }
             }, 300);
@@ -1083,6 +1140,17 @@
     // =====================================================================
     // Replay viewer
     // =====================================================================
+    // replay controls: one SVG icon set (emoji/text glyphs such as ⏮ ◀ ▶| rendered at different sizes)
+    const svgI = (d) => `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor">${d}</svg>`;
+    const ICON = {
+        first: svgI('<rect x="2" y="3" width="2" height="10" rx=".5"/><path d="M14 3v10L5 8z"/>'),
+        prev: svgI('<path d="M12 3v10L4 8z"/>'),
+        play: svgI('<path d="M4 2.5v11L13.5 8z"/>'),
+        pause: svgI('<rect x="3.5" y="3" width="3" height="10" rx=".6"/><rect x="9.5" y="3" width="3" height="10" rx=".6"/>'),
+        next: svgI('<path d="M4 3v10l8-5z"/>'),
+        last: svgI('<path d="M2 3v10l9-5z"/><rect x="12" y="3" width="2" height="10" rx=".5"/>')
+    };
+
     async function viewMatch(id) {
         const m = await api('GET', `/api/matches/${id}`);
         const goals = m.rules.blueGoal ? { blue: m.rules.blueGoal, red: m.rules.redGoal } : null;   // only games with goal squares
@@ -1109,11 +1177,11 @@
             <div class="replay-main">
                 <div class="card" style="margin:0"><div id="rp-board"></div>
                     <div class="controls">
-                        <button class="btn btn-sm" id="rp-first" title="Về đầu (Home)">⏮</button>
-                        <button class="btn btn-sm" id="rp-prev" title="Lùi 1 nước (←)">◀</button>
-                        <button class="btn btn-primary btn-sm" id="rp-play" title="Phát / Tạm dừng (Space)">▶ Phát</button>
-                        <button class="btn btn-sm" id="rp-next" title="Tiến 1 nước (→)">▶|</button>
-                        <button class="btn btn-sm" id="rp-last" title="Đến cuối (End)">⏭</button>
+                        <button class="btn ctl" id="rp-first" title="Về đầu (Home)" aria-label="Về đầu">${ICON.first}</button>
+                        <button class="btn ctl" id="rp-prev" title="Lùi 1 nước (←)" aria-label="Lùi 1 nước">${ICON.prev}</button>
+                        <button class="btn btn-primary ctl ctl-play" id="rp-play" title="Phát / Tạm dừng (Space)">${ICON.play}<span>Phát</span></button>
+                        <button class="btn ctl" id="rp-next" title="Tiến 1 nước (→)" aria-label="Tiến 1 nước">${ICON.next}</button>
+                        <button class="btn ctl" id="rp-last" title="Đến cuối (End)" aria-label="Đến cuối">${ICON.last}</button>
                         <select id="rp-speed" title="Tốc độ"><option value="1200">0.5×</option><option value="500" selected>1×</option><option value="220">2×</option><option value="90">5×</option><option value="30">15×</option></select>
                     </div>
                     <input id="rp-slider" class="slider" type="range" min="0" max="${N}" value="0">
@@ -1152,12 +1220,12 @@
         function play() {
             if (timer) return stop();
             if (ply >= N) ply = 0;
-            $('#rp-play').textContent = '⏸ Dừng';
+            $('#rp-play').innerHTML = `${ICON.pause}<span>Dừng</span>`;
             timer = setInterval(() => set(ply + 1), speed);
         }
         function stop() {
             if (timer) { clearInterval(timer); timer = null; }
-            const b = $('#rp-play'); if (b) b.textContent = '▶ Phát';
+            const b = $('#rp-play'); if (b) b.innerHTML = `${ICON.play}<span>Phát</span>`;
         }
         const delBtn = $('#rp-del');
         if (delBtn) delBtn.onclick = async () => {

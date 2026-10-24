@@ -11,6 +11,8 @@
     <script src="/socket.io/socket.io.js"></script>
     <script>window.io || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"><\/script>')</script>
     <link rel="stylesheet" href="arena.css">
+    <link rel="stylesheet" href="themes.css">
+    <script src="theme.js"></script>
 </head>
 
 <body>
@@ -27,7 +29,7 @@
         <div class="hub-tools">
             <button id="user-btn" class="btn btn-ghost" title="Tài khoản">🔐 Đăng nhập</button>
             <button id="logout-btn" class="btn btn-ghost" style="display:none" title="Đăng xuất">⏏</button>
-            <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện sáng/tối">🌙</button>
+            <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện">🎨</button>
         </div>
     </header>
 
@@ -35,6 +37,7 @@
     <div id="toast" class="toast" role="status"></div>
 
     <script src="bot_templates.js"></script>
+    <script src="confirm.js"></script>
     <script src="arena.js"></script>
 </body>
 

@@ -37,6 +37,7 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }   /* `label { display: flex }` & co. must not un-hide hidden elements */
 body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--ink); line-height: 1.45; }
 a { color: var(--blue); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -137,11 +138,11 @@ tr.advance td:first-child { box-shadow: inset 4px 0 0 var(--green); }
 .b-champ.won { border: 3px solid var(--gold); background: var(--gold-bg); color: var(--gold); box-shadow: 0 0 0 4px #d9770622; font-size: 1.05rem; }
 .b-legend { display: flex; gap: .9rem; flex-wrap: wrap; color: var(--ink-2); }
 .b-legend span { display: inline-flex; align-items: center; gap: .35rem; }
-.lg { display: inline-block; width: 22px; height: 0; border-top: 3px solid; }
-.lg.win { border-color: var(--green); }
-.lg.run { border-color: var(--blue); border-top-style: dashed; }
-.lg.wait { border-color: var(--line); border-top-style: dashed; }
-.lg.out { width: 12px; height: 12px; border: 2px solid var(--line); background: var(--surface-2); border-radius: 3px; opacity: .6; }
+.b-legend .lg { display: inline-block; width: 22px; height: 0; border-top: 3px solid; }
+.b-legend .lg.win { border-color: var(--green); }
+.b-legend .lg.run { border-color: var(--blue); border-top-style: dashed; }
+.b-legend .lg.wait { border-color: var(--line); border-top-style: dashed; }
+.b-legend .lg.out { width: 12px; height: 12px; border: 2px solid var(--line); background: var(--surface-2); border-radius: 3px; opacity: .6; }
 .sc { position: relative; background: var(--surface); border: 2px solid var(--border); border-radius: 10px; overflow: hidden; font-size: .88rem; }
 .sc.running { border-color: var(--blue); box-shadow: 0 0 0 3px #2563eb33; }
 .sc.done { border-color: var(--green); }
@@ -193,6 +194,9 @@ tr.advance td:first-child { box-shadow: inset 4px 0 0 var(--green); }
 .player-tag.red { background: var(--red-bg); border-color: var(--red); color: var(--red); }
 .player-tag.winner { box-shadow: 0 0 0 3px var(--gold); }
 .controls { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin: .8rem 0 .4rem; }
+.controls .ctl { height: 2.2rem; min-width: 2.4rem; padding: 0 .6rem; display: inline-flex; align-items: center; justify-content: center; gap: .35rem; box-shadow: none; font-size: .85rem; }
+.controls .ctl-play { min-width: 5.6rem; }
+.controls select { height: 2.2rem; padding: 0 .5rem; font-size: .85rem; }
 .slider { width: 100%; padding: 0; accent-color: var(--blue); }
 .move-list { max-height: 280px; overflow-y: auto; border: 2px solid var(--border); border-radius: 8px; font-family: 'Fira Code', monospace; font-size: .8rem; }
 .move-list .mv { display: flex; gap: .5rem; padding: .18rem .55rem; cursor: pointer; border-bottom: 1px solid var(--line); }
@@ -209,6 +213,16 @@ tr.advance td:first-child { box-shadow: inset 4px 0 0 var(--green); }
 .live-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
 .live-card { border: 2px solid var(--blue); border-radius: 12px; padding: .7rem; background: var(--surface); }
 .live-card .vs-title { font-size: .95rem; }
+.live-card.open { cursor: pointer; transition: transform .12s, box-shadow .12s; }
+.live-card.open:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.live-focus { border: 3px solid var(--blue); border-radius: 12px; padding: .8rem; margin-bottom: .9rem; background: var(--surface); }
+.live-list { display: grid; gap: .35rem; }
+.live-row { display: flex; align-items: center; gap: .6rem; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
+    background: var(--surface-2); border: 2px solid var(--line); border-radius: 8px; padding: .4rem .7rem; }
+.live-row:hover { border-color: var(--blue); }
+.live-row .vs-title { flex: 1; font-size: .9rem; }
+.sc.open { cursor: pointer; transition: box-shadow .12s; }
+.sc.open:hover { box-shadow: 0 0 0 3px var(--blue); }   /* no transform: the bracket lines are drawn from the card positions */
 .live-dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: var(--red); animation: pulse 1.2s infinite; margin-right: .3rem; }
 @keyframes pulse { 50% { opacity: .25; } }
 
@@ -230,6 +244,7 @@ tr.advance td:first-child { box-shadow: inset 4px 0 0 var(--green); }
 /* ---------- accounts ---------- */
 .auth-dialog { border: 3px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; background: var(--surface); color: var(--ink); width: min(420px, 92vw); box-shadow: var(--shadow); }
 .auth-dialog::backdrop { background: #0008; }
+dialog[open] { margin: auto; }       /* the global margin reset would pin modal dialogs to the top-left corner */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: .7rem; margin: .7rem 0; }
 .stat { border: 2px solid var(--border); border-radius: 10px; padding: .5rem .7rem; background: var(--surface-2); text-align: center; }
 .stat b { display: block; font-size: 1.35rem; font-family: 'Space Grotesk', sans-serif; }

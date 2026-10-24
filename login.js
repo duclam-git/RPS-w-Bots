@@ -73,6 +73,13 @@
             if (out.needAdminKey) {
                 $('#admin-name').textContent = out.username;
                 $('#admin-ttl').textContent = Math.round((out.expiresInSec || 120) / 60);
+                const consoleCode = out.keyMode === 'console';
+                $('#admin-how').innerHTML = consoleCode
+                    ? 'Một <strong>mã 6 số dùng một lần</strong> vừa được in trên <strong>console của máy chủ</strong> (cửa sổ đang chạy <code>npm start</code>). Nhập mã đó để mở phiên làm việc.'
+                    : 'Tài khoản quản trị cần thêm <strong>khóa admin</strong> (ADMIN_KEY của máy chủ) để mở phiên làm việc.';
+                $('#admin-key-label').textContent = consoleCode ? 'Mã trên console' : 'Khóa admin';
+                $('#f-key').type = consoleCode ? 'text' : 'password';
+                $('#f-key').inputMode = consoleCode ? 'numeric' : 'text';
                 $('#admin-msg').textContent = '';
                 showStep('admin');
                 return;

@@ -18,10 +18,14 @@
 Một trang đăng nhập cho tất cả. Tài khoản admin đăng nhập **hai bước**:
 
 1. Tên + mật khẩu như người chơi. Nếu tài khoản có quyền admin, server **chưa** tạo phiên mà chỉ trả `{ needAdminKey: true }` kèm một cookie thử thách `ott_admin_challenge` (ngẫu nhiên 256-bit, `HttpOnly; SameSite=Strict; Path=/api/auth`, sống 2 phút, dùng một lần, chỉ lưu SHA-256 trong bộ nhớ).
-2. Trang hỏi **khóa admin** (`ADMIN_KEY`) → `POST /api/auth/admin-verify`. Đúng → phiên admin (`sessions.admin_verified = 1`, hết hạn sau `ADMIN_SESSION_TTL_HOURS`, mặc định 8 giờ) và chuyển thẳng tới `arena.html#/admin`. Sai 3 lần → thử thách bị hủy, phải nhập lại mật khẩu; mỗi lần sai cũng tính vào khóa chống dò theo tên đăng nhập.
+2. Trang hỏi **bước thứ hai** → `POST /api/auth/admin-verify`. Có hai chế độ (`ADMIN_KEY_MODE`):
+   - `console` (mặc định khi không đặt `ADMIN_KEY`): **mỗi lần đăng nhập** server in ra console một **mã 6 số** riêng cho lần đó (`crypto.randomInt`, chỉ lưu băm, sống cùng thử thách 2 phút, dùng một lần). Không có bí mật nào nằm trong `.env` hay repo.
+   - `static` (mặc định khi có `ADMIN_KEY`): nhập khóa cố định `ADMIN_KEY`, dành cho admin không xem được console của server.
+
+   Đúng mã/khóa Đúng → phiên admin (`sessions.admin_verified = 1`, hết hạn sau `ADMIN_SESSION_TTL_HOURS`, mặc định 8 giờ) và chuyển thẳng tới `arena.html#/admin`. Sai 3 lần → thử thách bị hủy, phải nhập lại mật khẩu; mỗi lần sai cũng tính vào khóa chống dò theo tên đăng nhập.
 
 Quyền admin = **tài khoản role admin VÀ phiên đã qua bước khóa**. Hệ quả:
-- Biết `ADMIN_KEY` mà không có mật khẩu admin thì không làm gì được (đường cũ `claim-admin` "ai có khóa cũng thành admin" đã bỏ, trả 410). Lộ mật khẩu admin mà không có khóa cũng vậy.
+- Biết mã/khóa admin mà không có mật khẩu admin thì không làm gì được (đường cũ `claim-admin` "ai có khóa cũng thành admin" đã bỏ, trả 410). Lộ mật khẩu admin mà không có khóa cũng vậy.
 - Admin nâng/hạ quyền ai đó → mọi phiên của người đó bị thu hồi; người mới lên admin phải đăng nhập lại và qua bước khóa.
 - Migration v4 đăng xuất mọi phiên admin cũ (chúng chưa qua bước khóa).
 - Header `X-Admin-Key` (chỉ cần khóa) **tắt mặc định**; bật bằng `ADMIN_KEY_HEADER=1` khi cần cho script/CI.

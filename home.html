@@ -10,7 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="arena.css">
     <link rel="stylesheet" href="portal.css">
-    <script>if (localStorage.getItem('ott_theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');</script>
+    <link rel="stylesheet" href="themes.css">
+    <script src="theme.js"></script>
 </head>
 
 <body>
@@ -26,7 +27,7 @@
         </nav>
         <div class="hub-tools">
             <a class="btn btn-ghost" id="me-chip" href="#">👤 …</a>
-            <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện sáng/tối">🌙</button>
+            <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện">🎨</button>
             <button id="logout-btn" class="btn btn-ghost" title="Đăng xuất">⏏ Đăng xuất</button>
         </div>
     </header>
@@ -95,6 +96,7 @@
         </section>
     </main>
     <div id="toast" class="toast" role="status"></div>
+    <script src="confirm.js"></script>
     <script src="home.js"></script>
 </body>
 

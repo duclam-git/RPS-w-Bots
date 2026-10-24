@@ -19,6 +19,8 @@
 //   SANDBOX=auto|bwrap|builtin|off   default auto (strongest available).  bwrap = demand the strong tier.
 //   SANDBOX_STRICT=1                 refuse to run a language unless it is confined by the STRONG tier
 //   SANDBOX_MEM_MB (512)  SANDBOX_CPU_SEC (10)  SANDBOX_COMPILE_MEM_MB (2048)
+//   SANDBOX_WARM_CPU_SEC (120)       CPU budget of a warm bot process (one that answers many moves, see runner.js);
+//                                    when it runs out the process dies and the runner starts a fresh one
 
 'use strict';
 
@@ -35,6 +37,7 @@ const IS_WIN = process.platform === 'win32';
 const MEM_MB = parseInt(process.env.SANDBOX_MEM_MB, 10) || 512;
 const CPU_SEC = parseInt(process.env.SANDBOX_CPU_SEC, 10) || 10;
 const COMPILE_MEM_MB = parseInt(process.env.SANDBOX_COMPILE_MEM_MB, 10) || 2048;
+const WARM_CPU_SEC = Math.max(CPU_SEC, parseInt(process.env.SANDBOX_WARM_CPU_SEC, 10) || 120);
 const NODE_HEAP_MB = 128;
 const LAUNCHER = path.join(__dirname, 'sandbox_py.py');
 const ENGINE = path.join(__dirname, 'engine.js');
@@ -99,7 +102,7 @@ function systemMounts() {
     return args;
 }
 
-function bwrapBase(extra) {
+function bwrapBase(extra, cpuSec = CPU_SEC) {
     return [
         '--unshare-all',                 // user, ipc, pid, net (NO network), uts, cgroup
         '--die-with-parent', '--new-session', '--cap-drop', 'ALL', '--clearenv',
@@ -107,7 +110,7 @@ function bwrapBase(extra) {
         '--setenv', 'HOME', '/tmp',
         '--setenv', 'LANG', 'C.UTF-8',
         '--setenv', 'PYTHONIOENCODING', 'utf-8', '--setenv', 'PYTHONUTF8', '1',
-        '--setenv', 'OTT_MEM_MB', String(MEM_MB), '--setenv', 'OTT_CPU_SEC', String(CPU_SEC),
+        '--setenv', 'OTT_MEM_MB', String(MEM_MB), '--setenv', 'OTT_CPU_SEC', String(cpuSec),
         ...systemMounts(),
         '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp',
         ...extra
@@ -115,9 +118,9 @@ function bwrapBase(extra) {
 }
 
 /** prlimit prefix: CPU seconds, no files, no core. RLIMIT_AS is skipped for Node (V8 reserves huge address space). */
-function limitPrefix({ addressSpace }) {
+function limitPrefix({ addressSpace, cpuSec = CPU_SEC }) {
     if (!state.prlimit) return [];
-    const p = ['prlimit', `--cpu=${CPU_SEC}`, '--nofile=64', '--core=0', '--fsize=0'];
+    const p = ['prlimit', `--cpu=${cpuSec}`, '--nofile=64', '--core=0', '--fsize=0'];
     if (addressSpace) p.push(`--as=${MEM_MB * 1024 * 1024}`);
     p.push('--');
     return p;
@@ -211,7 +214,7 @@ function getStatus() {
         mode: state.mode, strict: requireStrong(), driver: state.driver,
         bwrap: state.bwrapPath ? { path: state.bwrapPath, version: state.bwrapVersion } : null,
         nodePermission: state.nodeFlag, levels: { ...state.levels }, notes: [...state.notes],
-        limits: { memoryMB: MEM_MB, cpuSeconds: CPU_SEC, nodeHeapMB: NODE_HEAP_MB }
+        limits: { memoryMB: MEM_MB, cpuSeconds: CPU_SEC, warmCpuSeconds: WARM_CPU_SEC, nodeHeapMB: NODE_HEAP_MB }
     };
 }
 
@@ -220,11 +223,19 @@ function getStatus() {
 // ---------------------------------------------------------------------------------------------
 
 /**
+ * JavaScript and Python bots run as a small server: one JSON state per line on stdin, one framed answer per
+ * line on stdout (see runner.js), so one process can answer many moves. C++ runs once per move.
  * @param {{lang:string, scriptPath?:string, exePath?:string}} handler
- * @param {{pythonCmd:string}} ctx
- * @returns {{cmd:string, args:string[], tier:string}}
+ * @param {{pythonCmd:string, warm?:boolean}} ctx   warm = the process will answer many moves (bigger CPU budget)
+ * @returns {{cmd:string, args:string[], tier:string, env:object}}
  */
-function wrapRun(handler, { pythonCmd }) {
+function wrapRun(handler, { pythonCmd, warm = false }) {
+    const spec = wrapRunInner(handler, pythonCmd, warm ? WARM_CPU_SEC : CPU_SEC);
+    spec.env = { OTT_CPU_SEC: String(warm ? WARM_CPU_SEC : CPU_SEC) };     // read by sandbox_py.py (basic tier)
+    return spec;
+}
+
+function wrapRunInner(handler, pythonCmd, cpuSec) {
     const lang = handler.lang;
     const level = state.mode === 'off' ? 'none' : state.levels[lang];
 
@@ -234,16 +245,16 @@ function wrapRun(handler, { pythonCmd }) {
         if (lang === 'javascript') {
             const engineFile = handler.enginePath || ENGINE;
             binds = ['--ro-bind', handler.scriptPath, '/bot/bot.js', '--ro-bind', engineFile, engineFile, ...toolMounts(process.execPath)];
-            inner = [...limitPrefix({ addressSpace: false }), process.execPath, `--max-old-space-size=${NODE_HEAP_MB}`, '/bot/bot.js'];
+            inner = [...limitPrefix({ addressSpace: false, cpuSec }), process.execPath, `--max-old-space-size=${NODE_HEAP_MB}`, '/bot/bot.js'];
         } else if (lang === 'python') {
             const py = which(pythonCmd);
             binds = ['--ro-bind', handler.scriptPath, '/bot/bot.py', '--ro-bind', LAUNCHER, '/bot/launcher.py', ...toolMounts(py)];
-            inner = [...limitPrefix({ addressSpace: true }), py, '-X', 'utf8', '-B', '/bot/launcher.py', '/bot/bot.py'];
+            inner = [...limitPrefix({ addressSpace: true, cpuSec }), py, '-X', 'utf8', '-B', '/bot/launcher.py', '--serve', '/bot/bot.py'];
         } else {
             binds = ['--ro-bind', handler.exePath, '/bot/bot.exe'];
             inner = [...limitPrefix({ addressSpace: true }), '/bot/bot.exe'];
         }
-        return { cmd: state.bwrapPath, args: [...bwrapBase(binds), '--', ...inner], tier: 'strong' };
+        return { cmd: state.bwrapPath, args: [...bwrapBase(binds, cpuSec), '--', ...inner], tier: 'strong' };
     }
 
     // ---- basic tier / off ----
@@ -258,14 +269,14 @@ function wrapRun(handler, { pythonCmd }) {
         return { cmd: process.execPath, args: [handler.scriptPath], tier: 'none' };
     }
     if (lang === 'python') {
-        if (state.mode === 'off') return { cmd: pythonCmd, args: [handler.scriptPath], tier: 'none' };
-        return { cmd: pythonCmd, args: ['-X', 'utf8', '-B', LAUNCHER, handler.scriptPath], tier: 'basic' };
+        if (state.mode === 'off') return { cmd: pythonCmd, args: ['-X', 'utf8', '-B', LAUNCHER, '--serve', '--no-sandbox', handler.scriptPath], tier: 'none' };
+        return { cmd: pythonCmd, args: ['-X', 'utf8', '-B', LAUNCHER, '--serve', handler.scriptPath], tier: 'basic' };
     }
     // cpp
     if (level === 'weak' && !IS_WIN) {
         return {
             cmd: 'sh', tier: 'weak',
-            args: ['-c', `ulimit -c 0 -t ${CPU_SEC} -n 64 -f 0 2>/dev/null; ulimit -v ${MEM_MB * 1024} 2>/dev/null; exec "$0"`, handler.exePath]
+            args: ['-c', `ulimit -c 0 -t ${cpuSec} -n 64 -f 0 2>/dev/null; ulimit -v ${MEM_MB * 1024} 2>/dev/null; exec "$0"`, handler.exePath]
         };
     }
     return { cmd: handler.exePath, args: [], tier: 'none' };

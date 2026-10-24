@@ -33,7 +33,7 @@ app.use('/api', auth.sameOriginOnly);     // CSRF guard for state-changing API c
 // Only the browser-facing files are public. The project folder also holds the SQLite database
 // (which contains submitted bot source code), server code and temp bot files - never serve those.
 const PUBLIC_FILES = new Set([
-    'index.html', 'style.css', 'logic.js', 'bots.js', 'bot_templates.js', 'elo.js',
+    'index.html', 'style.css', 'rps-unify.css', 'theme.js', 'themes.css', 'confirm.js', 'sfx.js', 'logic.js', 'bots.js', 'bot_templates.js', 'elo.js',
     'arena.html', 'arena.css', 'arena.js',
     'login.html', 'login.js', 'home.html', 'home.js', 'portal.css', 'guide.html',
     'caro.html', 'caro_page.js', 'caro_strategies.js', 'bot_client.js', 'bot_worker.js', 'engine.js', 'games/caro.js'
@@ -734,7 +734,10 @@ server.listen(PORT, () => {
     console.log(`⚔️ OTTv2 Code Arena Server running at http://localhost:${PORT}`);
     console.log(`🏆 Giải đấu & lịch sử trận:  http://localhost:${PORT}/arena.html`);
     console.log(`🔐 Đăng nhập (người chơi & admin):  http://localhost:${PORT}/login.html`);
-    if (auth.ADMIN_KEY_IS_GENERATED) {
+    if (auth.ADMIN_KEY_MODE === 'console') {
+        console.log('🔑 Đăng nhập admin: mỗi lần đăng nhập, mã 6 số dùng một lần sẽ hiện ở console này (ADMIN_KEY_MODE=console).');
+        if (process.env.ADMIN_KEY_HEADER === '1' && auth.ADMIN_KEY_IS_GENERATED) console.log(`   Khóa cho header X-Admin-Key (tự sinh, đổi mỗi lần chạy): ${auth.ADMIN_KEY}`);
+    } else if (auth.ADMIN_KEY_IS_GENERATED) {
         console.log(`🔑 ADMIN_KEY (tự sinh, đổi mỗi lần chạy): ${auth.ADMIN_KEY}`);
         console.log('   Đặt biến môi trường ADMIN_KEY để dùng khóa cố định. Khóa được hỏi ngay sau mật khẩu của tài khoản admin.');
     }

@@ -27,19 +27,10 @@
     }
 
     // ---------- theme (same key as every other page) ----------
-    function applyTheme(t) {
-        if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-        else document.documentElement.removeAttribute('data-theme');
-        $('#theme-btn').textContent = t === 'dark' ? '☀️' : '🌙';
-    }
-    applyTheme(localStorage.getItem('ott_theme') || 'light');
-    $('#theme-btn').addEventListener('click', () => {
-        const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-        localStorage.setItem('ott_theme', next);
-        applyTheme(next);
-    });
+    OTTTheme.attach($('#theme-btn'));      // theme picker (theme.js, shared by every page)
 
     $('#logout-btn').addEventListener('click', async () => {
+        if (!(await window.OTTConfirmLogout())) return;
         try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch (e) { /* offline */ }
         location.replace('/login.html');
     });

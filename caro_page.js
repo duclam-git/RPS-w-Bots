@@ -38,17 +38,8 @@
     }
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-    function applyTheme(t) {
-        if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-        else document.documentElement.removeAttribute('data-theme');
-        $('#theme-btn').textContent = t === 'dark' ? '☀️' : '🌙';
-    }
-    applyTheme(localStorage.getItem('ott_theme') || 'light');
-    $('#theme-btn').addEventListener('click', () => {
-        const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-        localStorage.setItem('ott_theme', next);
-        applyTheme(next);
-    });
+    OTTTheme.attach($('#theme-btn'));         // theme picker (theme.js, shared by every page)
+    OTTSound.attach($('#sound-btn'));         // sound on/off (sfx.js)
 
     // ---------------------------------------------------------------- controllers
     function fillControllers() {
@@ -262,6 +253,7 @@
         const rec = { player, to: chosen.to, notation: chosen.notation || E.toNotation(chosen.to.r, chosen.to.c, rules), ...(extra || {}) };
         moves.push(rec);
         addMoveToList(rec);
+        OTTSound.play(rec.fallback ? 'error' : 'place', rec.player);
         const res = E.checkWin(board, rules);
         if (res.winner !== null) finish(res.winner, res.reason);
         else if (moves.length >= rules.maxPlies) finish('draw', `Hòa sau ${rules.maxPlies} nước`);
@@ -274,6 +266,7 @@
         over = { winner, reason };
         running = false;
         $('#btn-start').textContent = '▶ Bắt đầu';
+        setTimeout(() => OTTSound.play(winner === 'draw' ? 'draw' : 'win'), 120);
         log(`${winner === 'draw' ? '🤝 Hòa' : `🏆 ${SIDE[winner]} thắng`}: ${reason}`, 'end');
         saveToHistory();
     }
@@ -504,6 +497,7 @@
             const rec = { player: m.player, to: m.to, notation: m.notation || E.toNotation(m.to.r, m.to.c, rules), ms: parseFloat(m.elapsed), fallback: /FALLBACK/.test(m.log || '') };
             moves.push(rec);
             addMoveToList(rec);
+            OTTSound.play(rec.fallback ? 'error' : 'place', rec.player);
             if (m.log) String(m.log).split('\n').filter(Boolean).slice(0, 20).forEach(x => log(`[${SIDE[m.player]}] ${x}`, `p${m.player}`));
             player = d.currentPlayer;
             drawBoard();
@@ -513,6 +507,7 @@
             over = { winner: d.winner, reason: d.reason, matchId: d.matchId };
             $('#ob-status').textContent = 'Trận đã kết thúc. Sửa code rồi bấm “Ván mới” để đấu lại.';
             $('#ob-rematch').hidden = false;
+            setTimeout(() => OTTSound.play(d.winner === 'draw' ? 'draw' : 'win'), 120);
             log(`${d.winner === 'draw' ? '🤝 Hòa' : `🏆 ${SIDE[d.winner]} thắng`}: ${d.reason}`, 'end');
             drawBoard();
         });

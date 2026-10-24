@@ -1,0 +1,63 @@
+/* ===== OTTv2 Code Arena - extra themes (loaded after the page's own CSS) =====
+   Each palette sits on a light or dark base (theme.js sets data-theme too) and only re-colours the neutrals:
+   page, cards, text, lines, borders and board cells. Team colours (Xanh / Đỏ) never change, they carry meaning.
+   Both variable sets are set: arena.css (--bg …) for arena/home/login/guide/caro, style.css (--theme-…) for index. */
+
+[data-palette="ocean"] {
+    --bg: #e3f1f6; --surface: #ffffff; --surface-2: #f0f8fb; --ink: #0c2d3a; --ink-2: #3d6170;
+    --line: #b6d8e3; --border: #0e3a4a; --cell-a: #e0f0f6; --cell-b: #bfdde9;
+    --theme-page: #e3f1f6; --theme-surface: #ffffff; --theme-surface-muted: #f0f8fb; --theme-surface-hover: #d3e9f1;
+    --theme-ink: #0c2d3a; --theme-ink-muted: #3d6170; --theme-border: #0e3a4a; --theme-line: #cfe6ee;
+}
+[data-palette="forest"] {
+    --bg: #e9f3e7; --surface: #fbfdf9; --surface-2: #f2f8f0; --ink: #13261a; --ink-2: #47604d;
+    --line: #c3dbc0; --border: #1f3d1f; --cell-a: #e6f1e3; --cell-b: #c8dfc3;
+    --theme-page: #e9f3e7; --theme-surface: #fbfdf9; --theme-surface-muted: #f2f8f0; --theme-surface-hover: #dcebd8;
+    --theme-ink: #13261a; --theme-ink-muted: #47604d; --theme-border: #1f3d1f; --theme-line: #d5e7d2;
+}
+[data-palette="sakura"] {
+    --bg: #fcebf1; --surface: #fffafc; --surface-2: #fdf2f6; --ink: #3b1424; --ink-2: #7a4a5d;
+    --line: #efc7d6; --border: #4a1d2e; --cell-a: #fbe8ef; --cell-b: #f1cbd9;
+    --theme-page: #fcebf1; --theme-surface: #fffafc; --theme-surface-muted: #fdf2f6; --theme-surface-hover: #f7dce6;
+    --theme-ink: #3b1424; --theme-ink-muted: #7a4a5d; --theme-border: #4a1d2e; --theme-line: #f5dbe5;
+}
+[data-palette="sand"] {
+    --bg: #f4ecdd; --surface: #fffaf1; --surface-2: #faf3e6; --ink: #2e2210; --ink-2: #6b5a3e;
+    --line: #e2d3b6; --border: #3e2c12; --cell-a: #f6eedd; --cell-b: #e6d6b6;
+    --theme-page: #f4ecdd; --theme-surface: #fffaf1; --theme-surface-muted: #faf3e6; --theme-surface-hover: #efe3cb;
+    --theme-ink: #2e2210; --theme-ink-muted: #6b5a3e; --theme-border: #3e2c12; --theme-line: #ece0c8;
+}
+[data-palette="midnight"] {
+    --bg: #120d1f; --surface: #1c1530; --surface-2: #271e40; --ink: #f3eefe; --ink-2: #a99cc8;
+    --line: #3a2f5a; --border: #5b4a8a; --cell-a: #251d3d; --cell-b: #30264f; --shadow: 3px 3px 0 #000;
+    --theme-page: #120d1f; --theme-surface: #1c1530; --theme-surface-muted: #271e40; --theme-surface-hover: #3a2f5a;
+    --theme-ink: #f3eefe; --theme-ink-muted: #a99cc8; --theme-border: #3a2f5a; --theme-line: #271e40;
+    --theme-term-bg: #0c0816;
+}
+[data-palette="jungle"] {
+    --bg: #0b1410; --surface: #12201a; --surface-2: #1a2d24; --ink: #e9f5ee; --ink-2: #8fb3a0;
+    --line: #29443a; --border: #3f6b57; --cell-a: #18291f; --cell-b: #22382c; --shadow: 3px 3px 0 #000;
+    --theme-page: #0b1410; --theme-surface: #12201a; --theme-surface-muted: #1a2d24; --theme-surface-hover: #29443a;
+    --theme-ink: #e9f5ee; --theme-ink-muted: #8fb3a0; --theme-border: #29443a; --theme-line: #1a2d24;
+    --theme-term-bg: #07100c;
+}
+
+/* ---------- the picker ---------- */
+.theme-menu {
+    position: fixed; z-index: 10000; min-width: 210px; padding: .4rem;
+    background: var(--surface, var(--theme-surface, #fff)); color: var(--ink, var(--theme-ink, #111));
+    border: 2px solid var(--border, var(--theme-border, #18181b)); border-radius: 12px;
+    box-shadow: 4px 4px 0 var(--border, var(--theme-border, #18181b));
+    font-family: 'Inter', system-ui, sans-serif;
+}
+.theme-menu-title { font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; opacity: .7; padding: .3rem .5rem .4rem; }
+.theme-menu button {
+    width: 100%; display: flex; align-items: center; gap: .6rem; padding: .45rem .5rem; border: 0; border-radius: 8px;
+    background: transparent; color: inherit; font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer; text-align: left;
+}
+.theme-menu button:hover, .theme-menu button:focus-visible { background: var(--surface-2, var(--theme-surface-muted, #f1f5f9)); outline: none; }
+.theme-menu button[aria-checked="true"] { font-weight: 800; }
+.theme-swatch { display: inline-flex; border: 1.5px solid currentColor; border-radius: 6px; overflow: hidden; flex: 0 0 auto; }
+.theme-swatch i { width: 12px; height: 20px; display: block; }
+.theme-name { flex: 1; }
+.theme-check { width: 1em; text-align: center; }

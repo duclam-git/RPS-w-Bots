@@ -34,27 +34,40 @@
     <script>window.io || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"><\/script>')</script>
 
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="rps-unify.css">
+    <link rel="stylesheet" href="themes.css">
+    <script src="theme.js"></script>
 </head>
 
 <body>
-    <div class="arena-app" id="arena-app">
-        <!-- Top Navigation / Arena Header -->
-        <header class="arena-header">
-            <div class="header-branding">
-                <div class="header-logo">
-                    <span class="logo-icon">⚔️</span>
-                    <div>
-                        <h1 class="logo-title">OTTv2 CODE ARENA</h1>
-                        <p class="logo-subtitle">Rock-Paper-Scissors Bot Coding Battle</p>
-                    </div>
-                </div>
+    <!-- Top navigation: the same bar as every other page (caro.html, arena.html, home.html) -->
+    <header class="hub-header">
+        <a class="hub-logo" href="home.html" title="Về trang người chơi">⚔️ <span>OTTv2 CODE ARENA</span></a>
+        <nav class="hub-nav">
+            <a id="home-link-btn" href="home.html">🏠 Chọn trò chơi</a>
+            <a href="index.html" class="active">✊ Oẳn tù tì</a>
+            <a href="arena.html#/tournaments">🏆 Giải đấu</a>
+            <a href="arena.html#/matches">📜 Lịch sử</a>
+            <a id="guide-link-btn" href="guide.html#rps">📘 Luật chơi</a>
+        </nav>
+        <div class="hub-tools">
+            <button id="profile-open-btn" class="hub-btn hub-ghost" title="Hồ sơ & Điểm Elo của bạn">
+                👤 <span id="header-player-name">Người chơi</span> (<strong id="header-player-elo">1200</strong>)
+            </button>
+            <a id="account-link-btn" class="hub-btn hub-ghost" href="login.html"
+                title="Đăng nhập để lưu thành tích và được tính Elo">🔐 Đăng nhập</a>
+            <button id="sound-toggle-btn" class="hub-btn hub-ghost" title="Tắt âm thanh">🔊</button>
+            <button id="theme-toggle-btn" class="hub-btn hub-ghost" title="Đổi giao diện">🎨</button>
+        </div>
+    </header>
 
-                <!-- Matchup Selection -->
-                <div class="matchup-bar">
-                    <!-- Blue Controller -->
-                    <div class="controller-box blue-box">
-                        <span class="controller-badge blue-badge">🔵 XANH</span>
-                        <select id="blue-controller-select" class="controller-dropdown"
+    <div class="arena-app" id="arena-app">
+        <!-- Match setup: who plays each side + the match buttons (same card as the Caro page) -->
+        <section class="rps-controls">
+            <div class="matchup-bar">
+                <label class="controller-box blue-box">
+                    <span class="controller-badge blue-badge">🔵 Xanh</span>
+                    <select id="blue-controller-select" class="controller-dropdown"
                             title="Chọn người điều khiển Đội Xanh">
                             <option value="custom" selected>🤖 Code Bot (BlueBot.js)</option>
                             <option value="human">👤 Người chơi (Thủ công)</option>
@@ -63,14 +76,13 @@
                             <option value="hunter">⚔️ Aggressive Hunter AI</option>
                             <option value="tactical">🧠 Tactical AI (Minimax)</option>
                         </select>
-                    </div>
+                </label>
 
-                    <div class="matchup-vs-badge">VS</div>
+                <div class="matchup-vs-badge">VS</div>
 
-                    <!-- Red Controller -->
-                    <div class="controller-box red-box">
-                        <span class="controller-badge red-badge">🔴 ĐỎ</span>
-                        <select id="red-controller-select" class="controller-dropdown"
+                <label class="controller-box red-box">
+                    <span class="controller-badge red-badge">🔴 Đỏ</span>
+                    <select id="red-controller-select" class="controller-dropdown"
                             title="Chọn người điều khiển Đội Đỏ">
                             <option value="tactical" selected>🧠 Tactical AI (Minimax)</option>
                             <option value="custom">🤖 Code Bot (RedBot.js)</option>
@@ -79,62 +91,29 @@
                             <option value="rusher">🚀 Goal Rusher AI</option>
                             <option value="hunter">⚔️ Aggressive Hunter AI</option>
                         </select>
-                    </div>
-                </div>
+                </label>
 
-                <!-- Profile & Theme Toggles -->
-                <div class="header-meta-group">
-                    <button id="profile-open-btn" class="profile-btn" title="Hồ sơ & Điểm Elo của bạn">
-                        👤 <span id="header-player-name">Người chơi</span> (<strong
-                            id="header-player-elo">1200</strong>)
-                    </button>
-                    <a id="home-link-btn" class="profile-btn" href="home.html" style="text-decoration:none"
-                        title="Về trang người chơi để chọn trò chơi khác">🏠 Chọn trò chơi</a>
-                    <a id="guide-link-btn" class="profile-btn" href="guide.html#rps" style="text-decoration:none"
-                        title="Luật chơi và cách viết bot">📘 Luật chơi</a>
-                    <a id="account-link-btn" class="profile-btn" href="login.html" style="text-decoration:none"
-                        title="Đăng nhập để lưu thành tích và được tính Elo">🔐 Đăng nhập</a>
-                    <button id="theme-toggle-btn" class="theme-toggle-btn" title="Chuyển chế độ ban đêm/ban ngày">
-                        🌙 Ban đêm
-                    </button>
-                </div>
-            </div>
-
-            <!-- Controls Toolbar -->
-            <div class="header-actions">
-                <div class="quick-modes">
-                    <button class="preset-mode-btn btn-online-mode" id="open-online-modal-btn"
-                        title="Thi đấu Online giữa 2 máy khác nhau">🌐 Đấu Online</button>
-                    <a class="preset-mode-btn" href="arena.html#/tournaments" style="text-decoration:none"
-                        title="Giải đấu, bảng xếp hạng và lịch sử trận">🏆 Giải đấu</a>
-                    <a class="preset-mode-btn" href="arena.html#/matches" style="text-decoration:none"
-                        title="Xem lại các trận đã đấu">📜 Lịch sử</a>
-                </div>
-
-                <div class="battle-controls">
-                    <button id="battle-start-btn" class="action-btn btn-primary">▶ Bắt đầu đấu</button>
-                    <button id="battle-step-btn" class="action-btn btn-secondary" title="Đi 1 nước đơn lẻ để xem xét">⏭
-                        Đi 1 nước</button>
-                    <button id="battle-reset-btn" class="action-btn btn-secondary" title="Thiết lập lại trận đấu">🔄
-                        Chơi lại</button>
-
-                    <div class="speed-select-wrap">
-                        <label for="battle-speed-select">⚡ Tốc độ:</label>
-                        <select id="battle-speed-select" class="speed-dropdown">
+                <label class="speed-select-wrap" for="battle-speed-select">⚡ Tốc độ
+                    <select id="battle-speed-select" class="speed-dropdown">
                             <option value="800">Rùa (800ms)</option>
                             <option value="350" selected>Chuẩn (350ms)</option>
                             <option value="120">Nhanh (120ms)</option>
                             <option value="30">Chớp nhoáng (30ms)</option>
                             <option value="5">Siêu tốc (5ms)</option>
                         </select>
-                    </div>
-
-                    <button id="open-benchmark-btn" class="action-btn btn-gold"
-                        title="Chạy mô phỏng hàng loạt 50 trận để đo tỉ lệ thắng">📊 Benchmark 50x</button>
-                    <button id="sound-toggle-btn" class="action-btn btn-utility">🔊 Âm thanh</button>
-                </div>
+                </label>
             </div>
-        </header>
+
+            <div class="battle-controls">
+                <button id="battle-start-btn" class="action-btn btn-primary">▶ Bắt đầu đấu</button>
+                <button id="battle-step-btn" class="action-btn btn-secondary" title="Đi 1 nước đơn lẻ để xem xét">⏭ Đi 1 nước</button>
+                <button id="battle-reset-btn" class="action-btn btn-secondary" title="Thiết lập lại trận đấu">🔄 Chơi lại</button>
+                <button id="open-benchmark-btn" class="action-btn btn-gold"
+                    title="Chạy mô phỏng hàng loạt 50 trận để đo tỉ lệ thắng">📊 Benchmark 50x</button>
+                <button class="action-btn btn-online-mode" id="open-online-modal-btn"
+                    title="Thi đấu Online giữa 2 máy khác nhau">🌐 Đấu online</button>
+            </div>
+        </section>
 
         <!-- Online Active Match Room Banner (Visible when player is in an Online Room) -->
         <div id="online-active-bar" class="online-active-bar" style="display: none;">

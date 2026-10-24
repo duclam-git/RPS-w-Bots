@@ -37,13 +37,27 @@ Nếu bubblewrap có mà không chạy được (Ubuntu 24.04 hạn chế user n
 | `SANDBOX=off` | không cách ly (không khuyến nghị) |
 | `SANDBOX_STRICT=1` | ngôn ngữ nào không được cách ly **mạnh** thì bị từ chối ở đăng ký giải / phòng online / luyện tập (khuyến nghị khi mở ra Internet) |
 | `SANDBOX_MEM_MB` (512), `SANDBOX_CPU_SEC` (10), `SANDBOX_COMPILE_MEM_MB` (2048) | giới hạn tài nguyên |
+| `SANDBOX_WARM_CPU_SEC` (120) | hạn mức CPU của một tiến trình bot phục vụ nhiều nước đi (xem §3b) |
+| `WARM_BOTS=0` | mỗi nước đi một tiến trình mới (cách ly từng nước tuyệt đối, tốn CPU hơn) |
 | `ALLOW_LOCAL_RUN=0` | tắt hẳn `/api/run-bot-move` (luyện tập Python/C++ qua server) |
 | `LOCAL_RUN_PER_MIN` / `LOCAL_RUN_PARALLEL` / `LOCAL_NEW_CODE_PER_MIN` | hạn mức `/api/run-bot-move` cho mỗi tài khoản (mặc định 600 / 2 / 20) |
+
+## 3b. Tiến trình bot phục vụ nhiều nước đi (từ v6.6)
+
+Khởi động một tiến trình tốn nhiều CPU hơn phần lớn bot dùng để suy nghĩ, nên bot **JavaScript và Python** nay nói chuyện với máy chủ theo từng dòng: một tiến trình trả lời nhiều nước đi của **đúng bot đó**. Bot C++ vẫn mỗi nước một tiến trình (file đã biên dịch khởi động ~1ms).
+
+Những gì **không** đổi: vẫn là tiến trình riêng, vẫn trong đúng sandbox của tầng đang dùng, vẫn không có mạng (tầng mạnh), không thừa hưởng biến môi trường, vẫn bị chặn 1MB output, và **mỗi nước đi vẫn bị cắt đúng hạn thời gian** — hết giờ là tiến trình bị giết, nước sau có tiến trình mới. Hai bot khác nhau không bao giờ dùng chung tiến trình.
+
+Những gì **có** đổi:
+- Mỗi nước đi code bot vẫn chạy lại từ đầu (khai báo ở mức ngoài cùng được tạo mới), nhưng thứ bot cố ý gắn vào `globalThis` (JS) hay module đã `import` (Python) **sống tiếp sang các nước sau của cùng bot đó** — trước đây mỗi nước là một tiến trình mới nên mất hết. Bot vẫn không thấy gì của bot khác. Muốn cách ly tuyệt đối từng nước: `WARM_BOTS=0`.
+- Tiến trình được giữ lại chiếm RAM khi đang rảnh (JS ~48MB, Python ~16MB). Tổng mức giữ lại bị `WARM_BOTS_MEM_MB` chặn (mặc định 40% RAM máy); vượt trần thì nước đi tự chạy như cũ chứ không bị từ chối. Trang **Quản trị → 🛡 Bảo mật** hiện số tiến trình đang giữ và RAM đang dùng.
+- Một tiến trình có hạn mức CPU tổng (`SANDBOX_WARM_CPU_SEC`, mặc định 120 giây) và số nước tối đa (`WARM_BOTS_MAX_MOVES`); hết thì bị thay. Nếu nó chết giữa chừng, nước đi đó được chạy lại trong tiến trình mới.
+- Đo trên máy 4 nhân: CPU mỗi nước đi giảm từ 42 → 10 ms (JS) và 16 → 3 ms (Python) ở tầng mạnh; 33 → 5 ms và 33 → 2 ms ở tầng cơ bản. Test: `test/warm.test.js`.
 
 ## 4. Khuyến nghị theo cách triển khai
 
 - **Lớp học / LAN tin cậy, Windows hay macOS:** mặc định là đủ (JS/Python có bảo vệ cơ bản; chỉ nhận C++ từ người bạn tin).
-- **Công khai ra Internet:** Linux + bubblewrap + `SANDBOX_STRICT=1`, chạy server bằng user không đặc quyền, đặt sau reverse proxy HTTPS (đặt `COOKIE_SECURE=1`), đặt `ADMIN_KEY` cố định.
+- **Công khai ra Internet:** Linux + bubblewrap + `SANDBOX_STRICT=1`, chạy server bằng user không đặc quyền, đặt sau reverse proxy HTTPS (đặt `COOKIE_SECURE=1`), giữ `ADMIN_KEY_MODE=console` (mã 1 lần, không có khóa nào để lộ) hoặc đặt `ADMIN_KEY` dài, ngẫu nhiên nếu cần khóa cố định.
 
 ## 5. Giới hạn — đọc kỹ
 

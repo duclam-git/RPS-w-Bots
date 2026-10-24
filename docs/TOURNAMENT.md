@@ -24,11 +24,11 @@ Nguyên tắc: **server giữ bàn cờ (authoritative)**. Bot chỉ nhận snap
 
 ```bash
 npm install
-ADMIN_PASSWORD=matkhau_admin ADMIN_KEY=khoa_admin npm start   # PowerShell: $env:ADMIN_KEY="..."; npm start
+ADMIN_PASSWORD=matkhau_admin npm start   # PowerShell: $env:ADMIN_PASSWORD="..."; npm start
 # mở  http://localhost:3000  (trang đăng nhập)
 npm test                                  # 76 test: unit, end-to-end, bot tấn công, nginx thật
 ```
-Không đặt `ADMIN_KEY` → server tự sinh khóa và in ra console (đổi mỗi lần chạy). Admin đăng nhập ở `login.html` bằng tài khoản admin + mật khẩu, rồi nhập khóa này (xem `docs/ACCOUNTS.md` mục 1b).
+Mặc định (`ADMIN_KEY_MODE=console`): admin đăng nhập ở `login.html` bằng tài khoản admin + mật khẩu, server in ra console một **mã 6 số dùng 1 lần** cho đúng lần đăng nhập đó, nhập mã này là xong. Muốn dùng khóa cố định thì đặt `ADMIN_KEY=...` (tự chuyển sang `static`). Xem `docs/ACCOUNTS.md` mục 1b.
 Biến môi trường khác: `PORT`, `DB_PATH` (mặc định `data/ott.db`), `PYTHON_CMD`.
 
 ## 3. Lịch sử & xem lại trận (#3)

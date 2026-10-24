@@ -10,7 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="arena.css">
     <link rel="stylesheet" href="portal.css">
-    <script>if (localStorage.getItem('ott_theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');</script>
+    <link rel="stylesheet" href="themes.css">
+    <script src="theme.js"></script>
 </head>
 
 <body class="auth-page">
@@ -52,9 +53,9 @@
             <!-- step 2: only for admin accounts, after the password was accepted -->
             <div id="step-admin" hidden>
                 <h2>🛡 Xác thực quản trị</h2>
-                <p class="small muted">Mật khẩu của <strong id="admin-name">admin</strong> đã đúng. Tài khoản quản trị cần thêm <strong>khóa admin</strong> (ADMIN_KEY của máy chủ) để mở phiên làm việc. Phiên này hết hạn sau <span id="admin-ttl">2</span> phút.</p>
+                <p class="small muted">Mật khẩu của <strong id="admin-name">admin</strong> đã đúng. <span id="admin-how">Tài khoản quản trị cần thêm <strong>khóa admin</strong> (ADMIN_KEY của máy chủ) để mở phiên làm việc.</span> Phiên này hết hạn sau <span id="admin-ttl">2</span> phút.</p>
                 <form id="admin-form" novalidate>
-                    <label>Khóa admin
+                    <label><span id="admin-key-label">Khóa admin</span>
                         <input id="f-key" type="password" autocomplete="one-time-code" maxlength="200" required>
                     </label>
                     <div id="admin-msg" class="auth-msg" role="alert"></div>

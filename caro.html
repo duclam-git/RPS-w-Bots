@@ -10,7 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="arena.css">
     <link rel="stylesheet" href="portal.css">
-    <script>if (localStorage.getItem('ott_theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');</script>
+    <link rel="stylesheet" href="themes.css">
+    <script src="theme.js"></script>
 
     <!-- Ace Code Editor: served by our own server first (works offline / on a LAN), CDN as fallback -->
     <script src="vendor/ace/ace.js"></script>
@@ -41,7 +42,8 @@
         </nav>
         <div class="hub-tools">
             <a class="btn btn-ghost" id="me-chip" href="home.html">👤 …</a>
-            <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện sáng/tối">🌙</button>
+            <button id="sound-btn" class="btn btn-ghost" title="Tắt âm thanh">🔊</button>
+            <button id="theme-btn" class="btn btn-ghost" title="Đổi giao diện">🎨</button>
         </div>
     </header>
 
@@ -212,6 +214,7 @@
     <script src="bot_templates.js"></script>
     <script src="caro_strategies.js"></script>
     <script src="bot_client.js"></script>
+    <script src="sfx.js"></script>
     <script src="caro_page.js"></script>
 </body>
 

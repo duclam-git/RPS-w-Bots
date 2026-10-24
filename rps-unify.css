@@ -1,0 +1,94 @@
+/* ===== OTTv2 Code Arena - Oẳn tù tì page (index.html) in the same look as the other pages =====
+   Loaded after style.css. Ports the hub-header bar and the arena .btn look (arena.css) onto the
+   --theme-* variables index.html uses, so themes.css keeps re-colouring this page too. */
+
+body { padding: 0; line-height: 1.45; }
+[hidden] { display: none !important; }
+.arena-app { padding: 1.2rem; }
+
+/* ---------- top bar (= arena.css .hub-header) ---------- */
+.hub-header {
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    padding: .7rem 1.2rem; background: var(--theme-surface); border-bottom: 3px solid var(--theme-border);
+    position: sticky; top: 0; z-index: 20;
+}
+.hub-header a { text-decoration: none; }
+.hub-logo { font-family: 'Space Grotesk', sans-serif; font-weight: 700; color: var(--theme-ink); font-size: 1.05rem; }
+.hub-nav { display: flex; gap: .4rem; flex: 1; flex-wrap: wrap; }
+.hub-nav a { padding: .35rem .8rem; border-radius: 8px; color: var(--theme-ink); font-weight: 600; font-size: .92rem; }
+.hub-nav a:hover { background: var(--theme-surface-muted); }
+.hub-nav a.active { background: var(--theme-ink); color: var(--theme-surface); }
+.hub-tools { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.hub-btn {
+    font: inherit; font-weight: 700; font-size: .88rem; cursor: pointer; color: var(--theme-ink);
+    padding: .45rem .9rem; border-radius: 8px; border: 2px solid transparent; background: transparent;
+    display: inline-flex; align-items: center; gap: .3rem;
+}
+.hub-btn:hover { background: var(--theme-surface-muted); }
+
+/* ---------- match setup card (= portal.css .caro-controls) ---------- */
+.rps-controls {
+    background: var(--theme-surface); border: 2px solid var(--theme-border); border-radius: 12px;
+    padding: 1rem 1.1rem; box-shadow: 3px 3px 0 var(--theme-border);
+    display: flex; flex-direction: column; gap: .8rem;
+}
+.rps-controls .matchup-bar { gap: .6rem; }
+.controller-box, .controller-box.blue-box, .controller-box.red-box {
+    border: 0; background: transparent; padding: 0; gap: .45rem; cursor: pointer;
+}
+.controller-badge { font-size: .85rem; letter-spacing: 0; font-weight: 700; }
+.matchup-vs-badge {
+    background: var(--theme-ink); color: var(--theme-surface); font-family: inherit;
+    font-weight: 800; font-size: .8rem; padding: .2rem .45rem;
+}
+.speed-select-wrap { font-size: .88rem; margin-left: auto; }
+
+/* every dropdown: the arena select look */
+.controller-dropdown, .speed-dropdown, .template-dropdown, .lang-select {
+    font: inherit; font-size: .88rem; font-weight: 600; padding: .4rem .55rem; height: 2.3rem;
+    border: 2px solid var(--theme-border); border-radius: 8px;
+    background: var(--theme-surface); color: var(--theme-ink);
+}
+.blue-box .controller-dropdown { border-color: var(--theme-blue); }
+.red-box .controller-dropdown { border-color: var(--theme-red); }
+
+/* ---------- buttons (= arena.css .btn / .btn-primary / .btn-gold) ---------- */
+.rps-controls .battle-controls { gap: .5rem; }
+.action-btn, .preset-mode-btn, .tb-btn, .profile-btn {
+    font: inherit; font-weight: 700; font-size: .88rem; cursor: pointer; line-height: 1.2;
+    padding: .45rem .9rem; border-radius: 8px; border: 2px solid var(--theme-border);
+    background: var(--theme-surface); color: var(--theme-ink); box-shadow: 2px 2px 0 var(--theme-border);
+    transition: none;
+}
+.action-btn:hover:not(:disabled), .preset-mode-btn:hover:not(:disabled),
+.tb-btn:hover:not(:disabled), .profile-btn:hover:not(:disabled) {
+    transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--theme-border); background: var(--theme-surface);
+}
+.action-btn:active { transform: none; box-shadow: 2px 2px 0 var(--theme-border); }
+.action-btn:disabled { opacity: .5; cursor: not-allowed; }
+.tb-btn { font-size: .8rem; padding: .3rem .6rem; }
+
+.btn-primary, .btn-primary:hover:not(:disabled) { background: var(--theme-blue); color: #fff; }
+.btn-gold, .btn-gold:hover:not(:disabled) { background: var(--theme-gold); color: #fff; }
+.btn-active-pause, .btn-active-pause:hover:not(:disabled) { background: var(--theme-gold) !important; color: #fff !important; }
+.btn-online-mode, .btn-online-mode:hover:not(:disabled) { background: var(--theme-surface); color: var(--theme-ink); }
+.btn-online-mode.connected, .btn-online-mode.connected:hover:not(:disabled) { background: var(--theme-surface); }
+.btn-online-mode.connected::after { content: ''; width: .5rem; height: .5rem; border-radius: 50%; background: #16a34a; margin-left: .15rem; }
+
+/* the page's big panels: same 2px border + 3px shadow as the cards on the other pages */
+.match-status-ribbon, .player-hud-card, .arena-studio-section {
+    border-width: 2px; border-radius: 12px; box-shadow: 3px 3px 0 var(--theme-border);
+}
+
+[data-theme="dark"] .rps-controls, [data-theme="dark"] .match-status-ribbon,
+[data-theme="dark"] .player-hud-card, [data-theme="dark"] .arena-studio-section { box-shadow: 3px 3px 0 #000; }
+[data-theme="dark"] .action-btn, [data-theme="dark"] .preset-mode-btn,
+[data-theme="dark"] .tb-btn, [data-theme="dark"] .profile-btn { box-shadow: 2px 2px 0 #000; }
+[data-theme="dark"] .controller-dropdown, [data-theme="dark"] .speed-dropdown,
+[data-theme="dark"] .template-dropdown, [data-theme="dark"] .lang-select { background: var(--theme-surface-muted); }
+
+@media (max-width: 720px) {
+    .hub-header { padding: .6rem .8rem; gap: .5rem; }
+    .arena-app { padding: .8rem; }
+    .speed-select-wrap { margin-left: 0; }
+}

@@ -33,7 +33,15 @@ const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
 // Admin key = second factor of the admin login (asked right after the admin account's password).
 // The bare X-Admin-Key header (key alone, no password) is off unless ADMIN_KEY_HEADER=1 (scripts / CI).
 // ---------------------------------------------------------------------
-const ADMIN_KEY = process.env.ADMIN_KEY || crypto.randomBytes(9).toString('base64url');
+// ADMIN_KEY_MODE:
+//   console  a fresh 6-digit one-time code is printed on the SERVER CONSOLE at every admin login (valid for
+//            the 2-minute challenge, single use). Nothing secret sits in .env or a repo. Default without ADMIN_KEY.
+//   static   the fixed ADMIN_KEY from the environment (for admins who cannot see the console). Default when
+//            ADMIN_KEY is set, so existing setups keep working.
+const ADMIN_KEY_MODE = ['console', 'static'].includes(String(process.env.ADMIN_KEY_MODE || '').toLowerCase())
+    ? String(process.env.ADMIN_KEY_MODE).toLowerCase()
+    : (process.env.ADMIN_KEY ? 'static' : 'console');
+const ADMIN_KEY = process.env.ADMIN_KEY || crypto.randomBytes(9).toString('base64url');   // static mode + X-Admin-Key
 const ADMIN_KEY_IS_GENERATED = !process.env.ADMIN_KEY;
 const ADMIN_USERNAME = USERNAME_RE.test(process.env.ADMIN_USERNAME || '') ? process.env.ADMIN_USERNAME : 'admin';
 const adminKeyHeaderEnabled = () => process.env.ADMIN_KEY_HEADER === '1';
@@ -129,9 +137,19 @@ function clearSessionCookie(res) {
 const challenges = new Map();      // sha256(challenge) -> { userId, username, expires, tries }
 function createChallenge(row) {
     const token = crypto.randomBytes(32).toString('base64url');
-    challenges.set(sha256(token), { userId: row.id, username: row.username, expires: Date.now() + CHALLENGE_TTL_MS, tries: 0 });
+    const ch = { userId: row.id, username: row.username, expires: Date.now() + CHALLENGE_TTL_MS, tries: 0, codeHash: null };
+    if (ADMIN_KEY_MODE === 'console') {
+        // one-time code for THIS login only, shown where only someone with access to the server can read it
+        const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+        ch.codeHash = sha256(code);
+        const at = new Date().toLocaleTimeString('vi-VN');
+        console.log(`🔑 [${at}] Mã đăng nhập admin cho "${row.username}": ${code}  (dùng 1 lần, hết hạn sau ${CHALLENGE_TTL_MS / 60000} phút)`);
+    }
+    challenges.set(sha256(token), ch);
     return token;
 }
+/** The second factor: this login's console code, or the fixed ADMIN_KEY in static mode. */
+const secondFactorOk = (ch, key) => (ch.codeHash ? safeEqual(sha256(String(key || '').trim()), ch.codeHash) : validAdminKey(key));
 function setChallengeCookie(req, res, token) {
     res.append('Set-Cookie',
         `${CHALLENGE_COOKIE}=${encodeURIComponent(token)}; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=${CHALLENGE_TTL_MS / 1000}${isSecureReq(req) ? '; Secure' : ''}`);
@@ -350,7 +368,7 @@ function createRouter({ rateLimit }) {
         if (row.role === 'admin') {
             // password was right, but an admin session needs the second factor first
             setChallengeCookie(req, res, createChallenge(row));
-            return res.json({ needAdminKey: true, username: row.username, expiresInSec: CHALLENGE_TTL_MS / 1000 });
+            return res.json({ needAdminKey: true, keyMode: ADMIN_KEY_MODE, username: row.username, expiresInSec: CHALLENGE_TTL_MS / 1000 });
         }
         startSession(req, res, row.id);
         res.json({ user: publicUser(userById(row.id)), redirect: homeFor(row) });
@@ -367,15 +385,15 @@ function createRouter({ rateLimit }) {
         }
         const wait = lockedFor(ch.username);
         if (wait) return res.status(429).json({ error: `Sai quá nhiều lần. Thử lại sau ${wait} giây.`, restart: true });
-        if (!validAdminKey((req.body || {}).key)) {
+        if (!secondFactorOk(ch, (req.body || {}).key)) {
             ch.tries++;
             noteFailure(ch.username);
             if (ch.tries >= CHALLENGE_MAX_TRIES) {
                 challenges.delete(sha256(token));
                 clearChallengeCookie(res);
-                return res.status(403).json({ error: 'Sai khóa admin quá nhiều lần. Hãy đăng nhập lại.', restart: true });
+                return res.status(403).json({ error: `Sai ${ch.codeHash ? 'mã' : 'khóa'} admin quá nhiều lần. Hãy đăng nhập lại.`, restart: true });
             }
-            return res.status(403).json({ error: `Sai khóa admin (còn ${CHALLENGE_MAX_TRIES - ch.tries} lần thử)` });
+            return res.status(403).json({ error: `Sai ${ch.codeHash ? 'mã' : 'khóa'} admin (còn ${CHALLENGE_MAX_TRIES - ch.tries} lần thử)` });
         }
         challenges.delete(sha256(token));          // single use
         clearChallengeCookie(res);
@@ -512,7 +530,7 @@ function createRouter({ rateLimit }) {
 }
 
 module.exports = {
-    ADMIN_KEY, ADMIN_KEY_IS_GENERATED, ADMIN_USERNAME, validAdminKey, isAdminReq, ensureAdminAccount, events,
+    ADMIN_KEY, ADMIN_KEY_IS_GENERATED, ADMIN_KEY_MODE, ADMIN_USERNAME, validAdminKey, isAdminReq, ensureAdminAccount, events,
     attachUser, requireUser, requireAdmin, sameOriginOnly,
     userFromCookieHeader, sessionHashFromCookieHeader, applyRatedResult, leaderboard, createRouter, publicUser,
     // exposed for tests

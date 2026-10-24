@@ -1,6 +1,6 @@
 # Trang quản trị (vấn đề #4)
 
-Vào bằng tài khoản admin ở trang đăng nhập chung `login.html`: mật khẩu, rồi **khóa admin** (`ADMIN_KEY`) — xem `ACCOUNTS.md` mục 1b. Đăng nhập xong được chuyển thẳng tới `arena.html#/admin`. Menu **🛠 Quản trị** chỉ hiện với phiên admin; người khác mở `#/admin` chỉ thấy thông báo khóa.
+Vào bằng tài khoản admin ở trang đăng nhập chung `login.html`: mật khẩu, rồi **mã 1 lần in ra console** (hoặc khóa cố định `ADMIN_KEY` ở chế độ `static`) — xem `ACCOUNTS.md` mục 1b. Đăng nhập xong được chuyển thẳng tới `arena.html#/admin`. Menu **🛠 Quản trị** chỉ hiện với phiên admin; người khác mở `#/admin` chỉ thấy thông báo khóa.
 
 ## 1. Những gì chỉnh được
 

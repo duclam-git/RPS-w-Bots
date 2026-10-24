@@ -1,8 +1,12 @@
 # OTTv2 Code Arena - Python bot launcher.
 #
-#   python3 -X utf8 sandbox_py.py <bot.py>
+#   python3 -X utf8 sandbox_py.py <bot.py>                  run the bot once, exactly like `python3 bot.py`
+#   python3 -X utf8 sandbox_py.py --serve [--no-sandbox] <bot.py>
+#       answer many moves in one process (runner.js): every stdin line is one JSON state; the bot runs as
+#       if it were started fresh (`__main__`, that line as its stdin, its stdout/stderr captured) and the
+#       launcher answers one line "\x01OTT {"out": ..., "err": ...}". Saves starting Python for every move.
 #
-# Applies resource limits and an audit hook, then runs the bot exactly like `python3 bot.py`.
+# Applies resource limits and an audit hook before any bot code runs.
 #
 # IMPORTANT: an audit hook raises the bar a lot but is NOT a security boundary on its own (Python's
 # own docs say so). On Linux the real boundary is bubblewrap (see sandbox.js); this launcher is the
@@ -144,11 +148,78 @@ def _install_hook(bot_file):
     sys.addaudithook(hook)
 
 
+def _write_all(fd, data):
+    while data:
+        n = os.write(fd, data)
+        data = data[n:]
+
+
+def serve(bot, sandboxed):
+    import builtins
+    import io
+    import json
+    import traceback
+    if sandboxed:
+        _apply_limits()
+    real_in = sys.stdin.buffer
+    # read + compile the bot once, before the hook is armed
+    with open(bot, "rb") as f:
+        source = f.read()
+    try:
+        code, compile_error = compile(source, bot, "exec"), ""
+    except SyntaxError:
+        code, compile_error = None, traceback.format_exc()
+    if sandboxed:
+        _install_hook(bot)
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != here]
+    sys.argv = [bot]
+    while True:
+        line = real_in.readline()
+        if not line:
+            break
+        if not line.strip():
+            continue
+        out, err = io.BytesIO(), io.BytesIO()
+        sys.stdin = io.TextIOWrapper(io.BytesIO(line), encoding="utf-8")
+        sys.stdout = io.TextIOWrapper(out, encoding="utf-8", errors="replace", write_through=True)
+        sys.stderr = io.TextIOWrapper(err, encoding="utf-8", errors="replace", write_through=True)
+        try:
+            if code is None:
+                sys.stderr.write(compile_error)
+            else:
+                exec(code, {"__name__": "__main__", "__file__": bot, "__builtins__": builtins})
+        except SystemExit as e:
+            if e.code not in (None, 0) and not isinstance(e.code, int):
+                sys.stderr.write("%s\n" % (e.code,))
+        except BaseException:
+            traceback.print_exc()
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        frame = json.dumps({"out": out.getvalue().decode("utf-8", "replace"),
+                            "err": err.getvalue().decode("utf-8", "replace")})
+        _write_all(1, b"\x01OTT " + frame.encode("utf-8") + b"\n")
+
+
 def main():
-    if len(sys.argv) < 2:
+    args = sys.argv[1:]
+    if args and args[0] == "--serve":
+        args = args[1:]
+        sandboxed = True
+        if args and args[0] == "--no-sandbox":
+            args, sandboxed = args[1:], False
+        if not args:
+            sys.stderr.write("usage: sandbox_py.py --serve [--no-sandbox] <bot.py>\n")
+            sys.exit(2)
+        serve(args[0], sandboxed)
+        return
+    if len(args) < 1:
         sys.stderr.write("usage: sandbox_py.py <bot.py>\n")
         sys.exit(2)
-    bot = sys.argv[1]
+    bot = args[0]
     _apply_limits()
     # pre-import what the runner needs, BEFORE the hook is armed
     import json  # noqa: F401
