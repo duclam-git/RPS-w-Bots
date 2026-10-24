@@ -1291,14 +1291,66 @@
         cpp: 'ace/mode/c_cpp'
     };
 
+    function isCodeContaminated(code, lang) {
+        if (!code || typeof code !== 'string') return true;
+        const trimmed = code.trim();
+        if (lang === 'python') {
+            if (/function\s+getNextMove/i.test(trimmed) || /#include\s*</i.test(trimmed) || /const\s+\w+/i.test(trimmed) || /let\s+\w+/i.test(trimmed)) {
+                return true;
+            }
+        } else if (lang === 'cpp') {
+            if (/function\s+getNextMove/i.test(trimmed) || /import\s+sys/i.test(trimmed) || /def\s+get_next_move/i.test(trimmed)) {
+                return true;
+            }
+        } else if (lang === 'javascript') {
+            if (/#include\s*</i.test(trimmed) || /import\s+sys/i.test(trimmed) || /def\s+get_next_move/i.test(trimmed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function getStarterCodeForLang(player, lang) {
+        if (window.MULTI_LANG_TEMPLATES && window.MULTI_LANG_TEMPLATES[lang]) {
+            const t = window.MULTI_LANG_TEMPLATES[lang];
+            if (player === 1) {
+                return t.starterBlue || t.blue || (lang === 'javascript' && window.BOT_PRESETS ? window.BOT_PRESETS.starterBlue : '');
+            } else {
+                return t.starterRed || t.red || (lang === 'javascript' && window.BOT_PRESETS ? window.BOT_PRESETS.starterRed : '');
+            }
+        }
+        if (lang === 'javascript' && window.BOT_PRESETS) {
+            return player === 1 ? window.BOT_PRESETS.starterBlue : window.BOT_PRESETS.starterRed;
+        }
+        return '';
+    }
+
+    function getTemplateCodeForLang(player, lang, key) {
+        if (key === 'starterBlue') return getStarterCodeForLang(1, lang);
+        if (key === 'starterRed') return getStarterCodeForLang(2, lang);
+
+        if (window.MULTI_LANG_TEMPLATES && window.MULTI_LANG_TEMPLATES[lang]) {
+            const code = window.MULTI_LANG_TEMPLATES[lang][key];
+            if (code) return code;
+        }
+        if (lang === 'javascript' && window.BOT_PRESETS && window.BOT_PRESETS[key]) {
+            return window.BOT_PRESETS[key];
+        }
+        return getStarterCodeForLang(player, lang);
+    }
+
     function getDefaultCodeForLang(player, lang) {
         const key = `ott_bot_code_${player === 1 ? 'blue' : 'red'}_${lang}`;
         const saved = localStorage.getItem(key);
-        if (saved) return saved;
-        if (window.MULTI_LANG_TEMPLATES && window.MULTI_LANG_TEMPLATES[lang]) {
-            return player === 1 ? window.MULTI_LANG_TEMPLATES[lang].blue : window.MULTI_LANG_TEMPLATES[lang].red;
+        if (saved) {
+            if (isCodeContaminated(saved, lang)) {
+                console.warn(`[OTT] Phát hiện code nhiễm chéo ngôn ngữ trong ${key}, tự động khôi phục.`);
+                localStorage.removeItem(key);
+            } else {
+                return saved;
+            }
         }
-        return window.BOT_PRESETS.random;
+        return getStarterCodeForLang(player, lang);
     }
 
     function initAceEditors() {
@@ -2134,9 +2186,14 @@
         if (blueTemplateSel) {
             blueTemplateSel.addEventListener('change', (e) => {
                 const key = e.target.value;
-                if (key && window.BOT_PRESETS && window.BOT_PRESETS[key]) {
-                    if (confirm("Tải mẫu bot này vào khung code Đội Xanh? Code hiện tại sẽ được thay thế.")) {
-                        setEditorCode(1, window.BOT_PRESETS[key]);
+                if (key) {
+                    const code = getTemplateCodeForLang(1, blueLang, key);
+                    if (code) {
+                        const langName = blueLang === 'python' ? 'Python' : (blueLang === 'cpp' ? 'C++' : 'JavaScript');
+                        if (confirm(`Tải mẫu bot (${langName}) vào khung code Đội Xanh? Code hiện tại sẽ được thay thế.`)) {
+                            localStorage.setItem(`ott_bot_code_blue_${blueLang}`, code);
+                            setEditorCode(1, code);
+                        }
                     }
                 }
                 blueTemplateSel.value = "";
@@ -2147,9 +2204,14 @@
         if (redTemplateSel) {
             redTemplateSel.addEventListener('change', (e) => {
                 const key = e.target.value;
-                if (key && window.BOT_PRESETS && window.BOT_PRESETS[key]) {
-                    if (confirm("Tải mẫu bot này vào khung code Đội Đỏ? Code hiện tại sẽ được thay thế.")) {
-                        setEditorCode(2, window.BOT_PRESETS[key]);
+                if (key) {
+                    const code = getTemplateCodeForLang(2, redLang, key);
+                    if (code) {
+                        const langName = redLang === 'python' ? 'Python' : (redLang === 'cpp' ? 'C++' : 'JavaScript');
+                        if (confirm(`Tải mẫu bot (${langName}) vào khung code Đội Đỏ? Code hiện tại sẽ được thay thế.`)) {
+                            localStorage.setItem(`ott_bot_code_red_${redLang}`, code);
+                            setEditorCode(2, code);
+                        }
                     }
                 }
                 redTemplateSel.value = "";
@@ -2176,16 +2238,22 @@
         const resetBlue = document.getElementById('reset-blue-btn');
         if (resetBlue) {
             resetBlue.addEventListener('click', () => {
-                if (confirm("Khôi phục code Đội Xanh về mẫu mặc định?")) {
-                    setEditorCode(1, window.BOT_PRESETS.starterBlue);
+                const langName = blueLang === 'python' ? 'Python' : (blueLang === 'cpp' ? 'C++' : 'JavaScript');
+                if (confirm(`Khôi phục code Đội Xanh về mẫu mặc định (${langName})?`)) {
+                    const starter = getStarterCodeForLang(1, blueLang);
+                    localStorage.setItem(`ott_bot_code_blue_${blueLang}`, starter);
+                    setEditorCode(1, starter);
                 }
             });
         }
         const resetRed = document.getElementById('reset-red-btn');
         if (resetRed) {
             resetRed.addEventListener('click', () => {
-                if (confirm("Khôi phục code Đội Đỏ về mẫu mặc định?")) {
-                    setEditorCode(2, window.BOT_PRESETS.starterRed);
+                const langName = redLang === 'python' ? 'Python' : (redLang === 'cpp' ? 'C++' : 'JavaScript');
+                if (confirm(`Khôi phục code Đội Đỏ về mẫu mặc định (${langName})?`)) {
+                    const starter = getStarterCodeForLang(2, redLang);
+                    localStorage.setItem(`ott_bot_code_red_${redLang}`, starter);
+                    setEditorCode(2, starter);
                 }
             });
         }

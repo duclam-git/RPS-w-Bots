@@ -6,15 +6,10 @@
     // C++ starter code. Written with String.raw so backslashes (\" and friends) reach the editor
     // untouched - inside a normal template literal they would be silently eaten and the code would
     // not compile.
-    function cppTemplate(o) {
-        return String.raw`/**
- * %ICON% %NAME% BOT (C++17)
- * Mục tiêu: Đưa quân tới ô đích %GOALNAME% (r=%GOALR%, c=%GOALC%) để chiến thắng!
- * Giao thức: Đọc JSON state từ stdin, in JSON nước đi ra stdout.
- */
-#include <algorithm>
+    const CPP_COMMON_HEADER = String.raw`#include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <ctime>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -36,8 +31,6 @@ int distance(int r1, int c1, int r2, int c2) {
 }
 
 // ---------- Đọc JSON tối giản (không cần thư viện ngoài) ----------
-
-// Trả về đoạn "[ ... ]" của một khoá, ví dụ "legalMoves":[ ... ]
 std::string extractArray(const std::string& s, const std::string& key) {
     size_t k = s.find("\"" + key + "\"");
     if (k == std::string::npos) return "";
@@ -51,7 +44,6 @@ std::string extractArray(const std::string& s, const std::string& key) {
     return "";
 }
 
-// Đọc số nguyên đứng sau khoá, tìm từ vị trí pos rồi dịch pos tới sau khoá đó
 bool readInt(const std::string& s, const std::string& key, size_t& pos, int& out) {
     size_t k = s.find("\"" + key + "\"", pos);
     if (k == std::string::npos) return false;
@@ -62,7 +54,6 @@ bool readInt(const std::string& s, const std::string& key, size_t& pos, int& out
     return true;
 }
 
-// Chỉ đọc mảng legalMoves (không đọc nhầm moveHistory cũng có from/to)
 std::vector<Move> parseLegalMoves(const std::string& input) {
     std::vector<Move> moves;
     const std::string arr = extractArray(input, "legalMoves");
@@ -79,7 +70,7 @@ std::vector<Move> parseLegalMoves(const std::string& input) {
         if (cap != std::string::npos && (nextFrom == std::string::npos || cap < nextFrom)) {
             size_t colon = arr.find(':', cap);
             size_t v = arr.find_first_not_of(" ", colon + 1);
-            m.hasCapture = (v != std::string::npos && arr[v] != 'n');  // "null" = không ăn quân
+            m.hasCapture = (v != std::string::npos && arr[v] != 'n');
         }
         moves.push_back(m);
         pos = p;
@@ -91,7 +82,15 @@ void printMove(const Move& m) {
     std::cout << "{\"from\":{\"r\":" << m.from.r << ",\"c\":" << m.from.c
               << "},\"to\":{\"r\":" << m.to.r << ",\"c\":" << m.to.c << "}}" << std::endl;
 }
+`;
 
+    function cppTemplate(o) {
+        return (String.raw`/**
+ * %ICON% %NAME% BOT (C++17)
+ * Mục tiêu: Đưa quân tới ô đích %GOALNAME% (r=%GOALR%, c=%GOALC%) để chiến thắng!
+ * Giao thức: Đọc JSON state từ stdin, in JSON nước đi ra stdout.
+ */
+` + CPP_COMMON_HEADER + String.raw`
 int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
@@ -126,107 +125,231 @@ int main() {
 
     printMove(legalMoves.front());
     return 0;
-}`
+}`)
             .replace(/%ICON%/g, o.icon).replace(/%NAME%/g, o.name).replace(/%TEAM%/g, o.team)
             .replace(/%GOALNAME%/g, o.goalName).replace(/%GOALR%/g, o.goalR).replace(/%GOALC%/g, o.goalC);
     }
 
-    window.MULTI_LANG_TEMPLATES = {
-        // ==========================================
-        // 1. JAVASCRIPT TEMPLATES
-        // ==========================================
-        javascript: {
-            blue: `/**
- * 🔵 BLUE BOT (JavaScript)
- * Mục tiêu: Đưa bất kỳ quân nào tới ô đích I9 (r=0, c=8) để chiến thắng!
+    const cppRusher = String.raw`/**
+ * 🚀 GOAL RUSHER BOT (C++17)
+ * Chiến thuật: Thần tốc lao về đích ở phía đối diện (I9 đối với Xanh, A1 đối với Đỏ)!
+ * Dùng khoảng cách Chebyshev (bước đi của Vua) để tìm đường ngắn nhất.
+ * Giao thức: Đọc JSON state từ stdin, in JSON nước đi ra stdout.
  */
-function getNextMove(state, helpers, log) {
-    const { legalMoves, myGoal } = state;
+` + CPP_COMMON_HEADER + String.raw`
+int main() {
+    std::ios_base::sync_with_stdio(false);
+    std::cin.tie(NULL);
 
-    // 1. Chiến thắng ngay nếu có nước đi chạm ô đích I9
-    const winMove = legalMoves.find(m => m.to.r === myGoal.r && m.to.c === myGoal.c);
-    if (winMove) {
-        log("🏆 Về đích I9 chiến thắng!", winMove.notation);
-        return winMove;
+    std::string input((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
+    if (input.empty()) return 0;
+
+    Coord myGoal{0, 8};
+    size_t gp = input.find("\"myGoal\"");
+    if (gp != std::string::npos) {
+        readInt(input, "r", gp, myGoal.r);
+        readInt(input, "c", gp, myGoal.c);
     }
 
-    // 2. Ưu tiên ăn quân cản đường
-    const captureMoves = legalMoves.filter(m => m.capture !== null);
-    if (captureMoves.length > 0) {
-        captureMoves.sort((a, b) => {
-            const dA = helpers.distance(a.to.r, a.to.c, myGoal.r, myGoal.c);
-            const dB = helpers.distance(b.to.r, b.to.c, myGoal.r, myGoal.c);
-            return dA - dB;
-        });
-        log("⚔️ Tiêu diệt quân địch cản đường:", captureMoves[0].notation);
-        return captureMoves[0];
+    std::vector<Move> legalMoves = parseLegalMoves(input);
+    if (legalMoves.empty()) return 0;
+
+    // 1. Thắng ngay nếu chạm đích
+    for (const auto& m : legalMoves) {
+        if (m.to.r == myGoal.r && m.to.c == myGoal.c) {
+            printMove(m);
+            return 0;
+        }
     }
 
-    // 3. Tiến gần nhất về phía đích I9 (khoảng cách Chebyshev)
-    const sorted = [...legalMoves].sort((a, b) => {
-        const dA = helpers.distance(a.to.r, a.to.c, myGoal.r, myGoal.c);
-        const dB = helpers.distance(b.to.r, b.to.c, myGoal.r, myGoal.c);
-        return dA - dB;
+    // 2. Sắp xếp đưa quân tới gần đích nhất (Chebyshev)
+    std::stable_sort(legalMoves.begin(), legalMoves.end(), [&](const Move& a, const Move& b) {
+        int distA = distance(a.to.r, a.to.c, myGoal.r, myGoal.c);
+        int distB = distance(b.to.r, b.to.c, myGoal.r, myGoal.c);
+        if (distA != distB) return distA < distB;
+        return a.hasCapture > b.hasCapture;
     });
 
-    log("Tiến về I9:", sorted[0].notation);
-    return sorted[0];
-}`,
-            red: `/**
- * 🔴 RED BOT (JavaScript)
- * Mục tiêu: Đưa bất kỳ quân nào tới ô đích A1 (r=8, c=0) để chiến thắng!
- */
-function getNextMove(state, helpers, log) {
-    const { legalMoves, myGoal, board, opponentPlayer } = state;
+    printMove(legalMoves.front());
+    return 0;
+}`;
 
-    // 1. Chiến thắng ngay nếu chạm đích A1
-    const winMove = legalMoves.find(m => m.to.r === myGoal.r && m.to.c === myGoal.c);
-    if (winMove) {
-        log("🏆 Chạm đích A1 chiến thắng!", winMove.notation);
-        return winMove;
+    const cppHunter = String.raw`/**
+ * ⚔️ AGGRESSIVE HUNTER BOT (C++17)
+ * Chiến thuật: Tiêu diệt quân cản đường và dọn sạch tuyến phòng thủ của đối thủ,
+ * sau đó hộ tống quân cờ tiến về đích ở phía bên kia.
+ * Giao thức: Đọc JSON state từ stdin, in JSON nước đi ra stdout.
+ */
+` + CPP_COMMON_HEADER + String.raw`
+int main() {
+    std::ios_base::sync_with_stdio(false);
+    std::cin.tie(NULL);
+
+    std::string input((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
+    if (input.empty()) return 0;
+
+    Coord myGoal{0, 8};
+    size_t gp = input.find("\"myGoal\"");
+    if (gp != std::string::npos) {
+        readInt(input, "r", gp, myGoal.r);
+        readInt(input, "c", gp, myGoal.c);
     }
 
-    // 2. Đánh giá điểm số từng nước đi
-    let bestMove = legalMoves[0];
-    let bestScore = -Infinity;
+    std::vector<Move> legalMoves = parseLegalMoves(input);
+    if (legalMoves.empty()) return 0;
 
-    for (const move of legalMoves) {
-        let score = 0;
-        const curDist = helpers.distance(move.from.r, move.from.c, myGoal.r, myGoal.c);
-        const newDist = helpers.distance(move.to.r, move.to.c, myGoal.r, myGoal.c);
-        score += (curDist - newDist) * 35; // Rút ngắn cự ly
+    // 1. Thắng ngay nếu chạm đích
+    for (const auto& m : legalMoves) {
+        if (m.to.r == myGoal.r && m.to.c == myGoal.c) {
+            printMove(m);
+            return 0;
+        }
+    }
 
-        if (move.capture) score += 100; // Thưởng ăn quân
+    // 2. Tìm tất cả nước ăn quân cản đường
+    std::vector<Move> captures;
+    for (const auto& m : legalMoves) {
+        if (m.hasCapture) captures.push_back(m);
+    }
+    if (!captures.empty()) {
+        std::stable_sort(captures.begin(), captures.end(), [&](const Move& a, const Move& b) {
+            return distance(a.to.r, a.to.c, myGoal.r, myGoal.c) < distance(b.to.r, b.to.c, myGoal.r, myGoal.c);
+        });
+        printMove(captures.front());
+        return 0;
+    }
 
-        const simBoard = helpers.simulateMove(board, move);
-        const oppMoves = helpers.getLegalMoves(opponentPlayer, simBoard);
-        if (oppMoves.some(em => em.to.r === move.to.r && em.to.c === move.to.c)) {
-            score -= 75; // Trừ điểm nếu bị đối phương ăn lại
+    // 3. Tiến quân về phía ô đích
+    std::stable_sort(legalMoves.begin(), legalMoves.end(), [&](const Move& a, const Move& b) {
+        return distance(a.to.r, a.to.c, myGoal.r, myGoal.c) < distance(b.to.r, b.to.c, myGoal.r, myGoal.c);
+    });
+
+    printMove(legalMoves.front());
+    return 0;
+}`;
+
+    const cppRandom = String.raw`/**
+ * 🎲 RANDOM BOT (C++17)
+ * Chiến thuật: Chọn ngẫu nhiên một nước đi hợp lệ.
+ * Nếu có nước đi thẳng vào ô đích thì đi ngay để chiến thắng!
+ * Giao thức: Đọc JSON state từ stdin, in JSON nước đi ra stdout.
+ */
+` + CPP_COMMON_HEADER + String.raw`
+int main() {
+    std::ios_base::sync_with_stdio(false);
+    std::cin.tie(NULL);
+
+    std::string input((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
+    if (input.empty()) return 0;
+
+    Coord myGoal{0, 8};
+    size_t gp = input.find("\"myGoal\"");
+    if (gp != std::string::npos) {
+        readInt(input, "r", gp, myGoal.r);
+        readInt(input, "c", gp, myGoal.c);
+    }
+
+    std::vector<Move> legalMoves = parseLegalMoves(input);
+    if (legalMoves.empty()) return 0;
+
+    // 1. Thắng ngay nếu có nước chạm đích
+    for (const auto& m : legalMoves) {
+        if (m.to.r == myGoal.r && m.to.c == myGoal.c) {
+            printMove(m);
+            return 0;
+        }
+    }
+
+    // 2. Chọn ngẫu nhiên một nước đi hợp lệ
+    std::srand((unsigned int)std::time(nullptr));
+    int idx = std::rand() % (int)legalMoves.size();
+    printMove(legalMoves[idx]);
+    return 0;
+}`;
+
+    const cppTactical = String.raw`/**
+ * 🧠 TACTICAL AI BOT (C++17)
+ * Chiến thuật đa chiều:
+ * - Ưu tiên hàng đầu: Tiến về ô đích ở phía đối diện
+ * - Chặn đứng đối thủ khi họ có nguy cơ áp sát ô đích của họ
+ * - Dọn dẹp các quân địch đang cản đường
+ * Giao thức: Đọc JSON state từ stdin, in JSON nước đi ra stdout.
+ */
+` + CPP_COMMON_HEADER + String.raw`
+int main() {
+    std::ios_base::sync_with_stdio(false);
+    std::cin.tie(NULL);
+
+    std::string input((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
+    if (input.empty()) return 0;
+
+    Coord myGoal{0, 8};
+    size_t gp = input.find("\"myGoal\"");
+    if (gp != std::string::npos) {
+        readInt(input, "r", gp, myGoal.r);
+        readInt(input, "c", gp, myGoal.c);
+    }
+
+    Coord oppGoal{8, 0};
+    size_t ogp = input.find("\"opponentGoal\"");
+    if (ogp != std::string::npos) {
+        readInt(input, "r", ogp, oppGoal.r);
+        readInt(input, "c", ogp, oppGoal.c);
+    }
+
+    std::vector<Move> legalMoves = parseLegalMoves(input);
+    if (legalMoves.empty()) return 0;
+
+    // 1. Thắng ngay nếu có nước chạm đích
+    for (const auto& m : legalMoves) {
+        if (m.to.r == myGoal.r && m.to.c == myGoal.c) {
+            printMove(m);
+            return 0;
+        }
+    }
+
+    // 2. Đánh giá từng nước đi
+    const Move* bestMove = &legalMoves.front();
+    int bestScore = -999999;
+
+    for (const auto& m : legalMoves) {
+        int score = 0;
+
+        // A. Rút ngắn cự ly tới đích (Trọng số cao nhất)
+        int curDist = distance(m.from.r, m.from.c, myGoal.r, myGoal.c);
+        int newDist = distance(m.to.r, m.to.c, myGoal.r, myGoal.c);
+        score += (curDist - newDist) * 50;
+
+        // B. Thưởng ăn quân
+        if (m.hasCapture) {
+            score += 120;
+        }
+
+        // C. Phòng thủ cản phá nếu đối phương áp sát đích
+        if (distance(m.to.r, m.to.c, oppGoal.r, oppGoal.c) <= 2) {
+            score += (9 - distance(m.to.r, m.to.c, oppGoal.r, oppGoal.c)) * 20;
         }
 
         if (score > bestScore) {
             bestScore = score;
-            bestMove = move;
+            bestMove = &m;
         }
     }
 
-    log("Đội Đỏ chọn nước:", bestMove.notation);
-    return bestMove;
-}`
-        },
+    printMove(*bestMove);
+    return 0;
+}`;
 
-        // ==========================================
-        // 2. PYTHON TEMPLATES
-        // ==========================================
-        python: {
-            blue: `"""
+    // ==========================================
+    // PYTHON TEMPLATES
+    // ==========================================
+    const pyStarterBlue = `"""
 🔵 BLUE BOT (Python 3)
 Mục tiêu: Đưa quân tới ô đích I9 (r=0, c=8) để chiến thắng!
 Giao thức: Đọc JSON state từ stdin, in JSON move ra stdout.
 """
 import sys
 import json
-import math
 
 def distance(r1, c1, r2, c2):
     return max(abs(r1 - r2), abs(c1 - c2))
@@ -263,15 +386,15 @@ if __name__ == "__main__":
                 "from": chosen_move["from"],
                 "to": chosen_move["to"]
             }))
-`,
-            red: `"""
+`;
+
+    const pyStarterRed = `"""
 🔴 RED BOT (Python 3)
 Mục tiêu: Đưa quân tới ô đích A1 (r=8, c=0) để chiến thắng!
 Giao thức: Đọc JSON state từ stdin, in JSON move ra stdout.
 """
 import sys
 import json
-import math
 
 def distance(r1, c1, r2, c2):
     return max(abs(r1 - r2), abs(c1 - c2))
@@ -317,7 +440,227 @@ if __name__ == "__main__":
                 "from": chosen_move["from"],
                 "to": chosen_move["to"]
             }))
-`
+`;
+
+    const pyRusher = `"""
+🚀 GOAL RUSHER BOT (Python 3)
+Chiến thuật: Thần tốc lao về đích ở phía đối diện (I9 đối với Xanh, A1 đối với Đỏ)!
+Dùng khoảng cách Chebyshev (bước đi của Vua) để tìm đường ngắn nhất.
+Giao thức: Đọc JSON state từ stdin, in JSON move ra stdout.
+"""
+import sys
+import json
+
+def distance(r1, c1, r2, c2):
+    return max(abs(r1 - r2), abs(c1 - c2))
+
+def get_next_move(state):
+    legal_moves = state.get("legalMoves", [])
+    if not legal_moves:
+        return None
+
+    my_goal = state.get("myGoal", {"r": 0, "c": 8} if state.get("myPlayer") == 1 else {"r": 8, "c": 0})
+
+    # 1. Thắng ngay nếu chạm đích
+    for m in legal_moves:
+        if m["to"]["r"] == my_goal["r"] and m["to"]["c"] == my_goal["c"]:
+            return m
+
+    # 2. Sắp xếp đưa quân tới gần đích nhất
+    def sort_key(m):
+        dist = distance(m["to"]["r"], m["to"]["c"], my_goal["r"], my_goal["c"])
+        has_cap = 1 if m.get("capture") is not None else 0
+        return (dist, -has_cap)
+
+    legal_moves.sort(key=sort_key)
+    return legal_moves[0]
+
+if __name__ == "__main__":
+    raw_input = sys.stdin.read()
+    if raw_input.strip():
+        state = json.loads(raw_input)
+        chosen_move = get_next_move(state)
+        if chosen_move:
+            print(json.dumps({
+                "from": chosen_move["from"],
+                "to": chosen_move["to"]
+            }))
+`;
+
+    const pyHunter = `"""
+⚔️ AGGRESSIVE HUNTER BOT (Python 3)
+Chiến thuật: Tiêu diệt quân cản đường và dọn sạch tuyến phòng thủ của đối thủ,
+sau đó hộ tống quân cờ tiến về đích ở phía bên kia.
+Giao thức: Đọc JSON state từ stdin, in JSON move ra stdout.
+"""
+import sys
+import json
+
+def distance(r1, c1, r2, c2):
+    return max(abs(r1 - r2), abs(c1 - c2))
+
+def get_next_move(state):
+    legal_moves = state.get("legalMoves", [])
+    if not legal_moves:
+        return None
+
+    my_goal = state.get("myGoal", {"r": 0, "c": 8} if state.get("myPlayer") == 1 else {"r": 8, "c": 0})
+
+    # 1. Thắng ngay nếu có thể chạm đích
+    for m in legal_moves:
+        if m["to"]["r"] == my_goal["r"] and m["to"]["c"] == my_goal["c"]:
+            return m
+
+    # 2. Tìm tất cả nước ăn quân cản đường
+    captures = [m for m in legal_moves if m.get("capture") is not None]
+    if captures:
+        captures.sort(key=lambda m: distance(m["to"]["r"], m["to"]["c"], my_goal["r"], my_goal["c"]))
+        return captures[0]
+
+    # 3. Tiến quân về phía ô đích
+    legal_moves.sort(key=lambda m: distance(m["to"]["r"], m["to"]["c"], my_goal["r"], my_goal["c"]))
+    return legal_moves[0]
+
+if __name__ == "__main__":
+    raw_input = sys.stdin.read()
+    if raw_input.strip():
+        state = json.loads(raw_input)
+        chosen_move = get_next_move(state)
+        if chosen_move:
+            print(json.dumps({
+                "from": chosen_move["from"],
+                "to": chosen_move["to"]
+            }))
+`;
+
+    const pyTactical = `"""
+🧠 TACTICAL AI BOT (Python 3)
+Chiến thuật đa chiều:
+- Rút ngắn cự ly tới ô đích (trọng số cao nhất)
+- Ăn quân dọn đường tiến công
+- Phòng thủ khi đối phương áp sát ô đích của họ
+Giao thức: Đọc JSON state từ stdin, in JSON move ra stdout.
+"""
+import sys
+import json
+
+def distance(r1, c1, r2, c2):
+    return max(abs(r1 - r2), abs(c1 - c2))
+
+def get_next_move(state):
+    legal_moves = state.get("legalMoves", [])
+    if not legal_moves:
+        return None
+
+    my_player = state.get("myPlayer", 1)
+    my_goal = state.get("myGoal", {"r": 0, "c": 8} if my_player == 1 else {"r": 8, "c": 0})
+    opp_goal = state.get("opponentGoal", {"r": 8, "c": 0} if my_player == 1 else {"r": 0, "c": 8})
+
+    # 1. Thắng ngay nếu chạm đích
+    for m in legal_moves:
+        if m["to"]["r"] == my_goal["r"] and m["to"]["c"] == my_goal["c"]:
+            return m
+
+    best_move = legal_moves[0]
+    best_score = -float('inf')
+
+    for m in legal_moves:
+        score = 0
+        cur_dist = distance(m["from"]["r"], m["from"]["c"], my_goal["r"], my_goal["c"])
+        new_dist = distance(m["to"]["r"], m["to"]["c"], my_goal["r"], my_goal["c"])
+        score += (cur_dist - new_dist) * 50
+
+        # Thưởng ăn quân
+        if m.get("capture") is not None:
+            score += 120
+
+        # Phòng thủ: đối thủ đang gần đích của họ thì cản phá
+        dist_to_opp_goal = distance(m["to"]["r"], m["to"]["c"], opp_goal["r"], opp_goal["c"])
+        if dist_to_opp_goal <= 2:
+            score += (9 - dist_to_opp_goal) * 20
+
+        if score > best_score:
+            best_score = score
+            best_move = m
+
+    return best_move
+
+if __name__ == "__main__":
+    raw_input = sys.stdin.read()
+    if raw_input.strip():
+        state = json.loads(raw_input)
+        chosen_move = get_next_move(state)
+        if chosen_move:
+            print(json.dumps({
+                "from": chosen_move["from"],
+                "to": chosen_move["to"]
+            }))
+`;
+
+    const pyRandom = `"""
+🎲 RANDOM BOT (Python 3)
+Chiến thuật: Chọn ngẫu nhiên một nước đi hợp lệ.
+Nếu có nước đi thẳng vào ô đích thì đi ngay để chiến thắng!
+Giao thức: Đọc JSON state từ stdin, in JSON move ra stdout.
+"""
+import sys
+import json
+import random
+
+def get_next_move(state):
+    legal_moves = state.get("legalMoves", [])
+    if not legal_moves:
+        return None
+
+    my_goal = state.get("myGoal", {"r": 0, "c": 8} if state.get("myPlayer") == 1 else {"r": 8, "c": 0})
+
+    # 1. Thắng ngay nếu chạm đích
+    for m in legal_moves:
+        if m["to"]["r"] == my_goal["r"] and m["to"]["c"] == my_goal["c"]:
+            return m
+
+    # 2. Chọn ngẫu nhiên
+    return random.choice(legal_moves)
+
+if __name__ == "__main__":
+    raw_input = sys.stdin.read()
+    if raw_input.strip():
+        state = json.loads(raw_input)
+        chosen_move = get_next_move(state)
+        if chosen_move:
+            print(json.dumps({
+                "from": chosen_move["from"],
+                "to": chosen_move["to"]
+            }))
+`;
+
+    window.MULTI_LANG_TEMPLATES = {
+        // ==========================================
+        // 1. JAVASCRIPT TEMPLATES
+        // ==========================================
+        javascript: {
+            get blue() { return window.BOT_PRESETS ? window.BOT_PRESETS.starterBlue : ''; },
+            get red() { return window.BOT_PRESETS ? window.BOT_PRESETS.starterRed : ''; },
+            get starterBlue() { return window.BOT_PRESETS ? window.BOT_PRESETS.starterBlue : ''; },
+            get starterRed() { return window.BOT_PRESETS ? window.BOT_PRESETS.starterRed : ''; },
+            get random() { return window.BOT_PRESETS ? window.BOT_PRESETS.random : ''; },
+            get rusher() { return window.BOT_PRESETS ? window.BOT_PRESETS.rusher : ''; },
+            get hunter() { return window.BOT_PRESETS ? window.BOT_PRESETS.hunter : ''; },
+            get tactical() { return window.BOT_PRESETS ? window.BOT_PRESETS.tactical : ''; }
+        },
+
+        // ==========================================
+        // 2. PYTHON TEMPLATES
+        // ==========================================
+        python: {
+            blue: pyStarterBlue,
+            red: pyStarterRed,
+            starterBlue: pyStarterBlue,
+            starterRed: pyStarterRed,
+            random: pyRandom,
+            rusher: pyRusher,
+            hunter: pyHunter,
+            tactical: pyTactical
         },
 
         // ==========================================
@@ -329,7 +672,17 @@ if __name__ == "__main__":
             }),
             red: cppTemplate({
                 icon: '🔴', name: 'RED', team: 'Đỏ', goalName: 'A1', goalR: 8, goalC: 0
-            })
+            }),
+            starterBlue: cppTemplate({
+                icon: '🔵', name: 'BLUE', team: 'Xanh', goalName: 'I9', goalR: 0, goalC: 8
+            }),
+            starterRed: cppTemplate({
+                icon: '🔴', name: 'RED', team: 'Đỏ', goalName: 'A1', goalR: 8, goalC: 0
+            }),
+            random: cppRandom,
+            rusher: cppRusher,
+            hunter: cppHunter,
+            tactical: cppTactical
         }
     };
 
